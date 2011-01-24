@@ -60,3 +60,34 @@ class FeedgeneratorTest(unittest.TestCase):
             "2008-11-14T13:37:00+02:00"
         )
 
+
+class Issue14202PatchTest(unittest.TestCase):
+    """
+    There is a bug in django.utils.feedgenerator.Rss201rev2Feed that has been
+    reported in #14202 before.
+
+    http://code.djangoproject.com/ticket/14202
+
+    The feed_url property is optional but was required later on to write the
+    atom:link attribute to the RSS-feed.
+
+    It is perfectly fine to leave the feed_url property as optional since it
+    is not required by RSS (http://bit.ly/bAZpKT). Therefore the patch only
+    renders the atom:link attribute if a feed_url is given.
+    """
+
+    def test_feed_without_feed_url_gets_rendered_without_atom_link(self):
+        feed = feedgenerator.Rss201rev2Feed('title', '/link/', 'descr')
+        feed_content = feed.writeString('utf-8')
+
+        self.assertEquals(feed.feed['feed_url'], None)
+        self.assertFalse('<atom:link href=' in feed_content)
+
+    def test_feed_with_feed_url_gets_rendered_with_atom_link(self):
+        feed = feedgenerator.Rss201rev2Feed('title', '/link/', 'descr', feed_url='/feed/')
+        feed_content = feed.writeString('utf-8')
+
+        self.assertEquals(feed.feed['feed_url'], '/feed/')
+        self.assertTrue('<atom:link href="/feed/" rel="self"></atom:link>' in \
+            feed_content)
+
