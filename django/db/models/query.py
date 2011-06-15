@@ -668,12 +668,14 @@ class QuerySet(object):
         obj.query.add_ordering(*field_names)
         return obj
 
-    def distinct(self, true_or_false=True):
+    def distinct(self, *field_names):
         """
         Returns a new QuerySet instance that will select only distinct results.
         """
         obj = self._clone()
-        obj.query.distinct = true_or_false
+        obj.query.add_distinct_fields(field_names)
+        obj.query.distinct = True
+
         return obj
 
     def extra(self, select=None, where=None, params=None, tables=None,
@@ -1093,7 +1095,7 @@ class EmptyQuerySet(QuerySet):
         """
         return self
 
-    def distinct(self, true_or_false=True):
+    def distinct(self, fields=None):
         """
         Always returns EmptyQuerySet.
         """

@@ -208,6 +208,9 @@ class Celebrity(models.Model):
     name = models.CharField("Name", max_length=20)
     greatest_fan = models.ForeignKey("Fan", null=True, unique=True)
 
+    def __unicode__(self):
+        return self.name
+
 class TvChef(Celebrity):
     pass
 
@@ -317,3 +320,12 @@ class ObjectC(models.Model):
 
     def __unicode__(self):
        return self.name
+
+
+class Staff(models.Model):
+    name = models.CharField(max_length=50)
+    organisation = models.CharField(max_length=100)
+
+    def __unicode__(self):
+        return self.name
+

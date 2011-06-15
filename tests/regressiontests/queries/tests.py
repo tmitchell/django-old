@@ -15,7 +15,7 @@ from models import (Annotation, Article, Author, Celebrity, Child, Cover, Detail
     DumbCategory, ExtraInfo, Fan, Item, LeafA, LoopX, LoopZ, ManagedModel,
     Member, NamedCategory, Note, Number, Plaything, PointerA, Ranking, Related,
     Report, ReservedName, Tag, TvChef, Valid, X, Food, Eaten, Node, ObjectA, ObjectB,
-    ObjectC)
+    ObjectC, Staff)
 
 
 class BaseQuerysetTest(TestCase):
@@ -1606,6 +1606,18 @@ class ConditionalTests(BaseQuerysetTest):
         t4 = Tag.objects.create(name='t4', parent=t3)
         t5 = Tag.objects.create(name='t5', parent=t3)
 
+        p1_o1 = Staff.objects.create(name="p1", organisation="o1")
+        p2_o1 = Staff.objects.create(name="p2", organisation="o1")
+        p3_o1 = Staff.objects.create(name="p3", organisation="o1")
+        p1_o2 = Staff.objects.create(name="p1", organisation="o2")
+
+        celeb1 = Celebrity.objects.create(name="c1")
+        celeb2 = Celebrity.objects.create(name="c2")
+
+        self.fan1 = Fan.objects.create(fan_of=celeb1)
+        self.fan2 = Fan.objects.create(fan_of=celeb1)
+        self.fan3 = Fan.objects.create(fan_of=celeb2)
+
     # In Python 2.6 beta releases, exceptions raised in __len__ are swallowed
     # (Python issue 1242657), so these cases return an empty list, rather than
     # raising an exception. Not a lot we can do about that, unfortunately, due to
@@ -1676,6 +1688,44 @@ class ConditionalTests(BaseQuerysetTest):
             Number.objects.filter(num__in=numbers).count(),
             2500
         )
+
+    @skipUnlessDBFeature('can_distinct_on_fields')
+    def test_ticket6422(self):
+        # (qset, expected) tuples
+        qsets = (
+            (
+                Staff.objects.distinct().order_by('name'),
+                ['<Staff: p1>', '<Staff: p1>', '<Staff: p2>', '<Staff: p3>'],
+            ),
+            (
+                Staff.objects.distinct('name').order_by('name'),
+                ['<Staff: p1>', '<Staff: p2>', '<Staff: p3>'],
+            ),
+            (
+                Staff.objects.distinct('organisation').order_by('organisation', 'name'),
+                ['<Staff: p1>', '<Staff: p1>'],
+            ),
+            (
+                Staff.objects.distinct('name', 'organisation').order_by('name', 'organisation'),
+                ['<Staff: p1>', '<Staff: p1>', '<Staff: p2>', '<Staff: p3>'],
+            ),
+            (
+                Celebrity.objects.filter(fan__in=[self.fan1, self.fan2, self.fan3]).\
+                    distinct('name').order_by('name'),
+                ['<Celebrity: c1>', '<Celebrity: c2>'],
+            ),
+        )
+
+        for qset, expected in qsets:
+            self.assertQuerysetEqual(qset, expected)
+            self.assertEqual(qset.count(), len(expected))
+
+        # and check the fieldlookup
+        self.assertRaises(
+            FieldError,
+            lambda: Staff.objects.distinct('shrubbery')
+        )
+
 
 class UnionTests(unittest.TestCase):
     """
