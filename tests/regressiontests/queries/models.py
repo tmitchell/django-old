@@ -325,7 +325,15 @@ class ObjectC(models.Model):
 class Staff(models.Model):
     name = models.CharField(max_length=50)
     organisation = models.CharField(max_length=100)
+    tags = models.ManyToManyField(Tag, through='StaffTag')
 
     def __unicode__(self):
         return self.name
+
+class StaffTag(models.Model):
+    staff = models.ForeignKey(Staff)
+    tag = models.ForeignKey(Tag)
+
+    def __unicode__(self):
+        return u"%s -> %s" % (self.tag, self.staff)
 

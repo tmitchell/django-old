@@ -15,7 +15,7 @@ from models import (Annotation, Article, Author, Celebrity, Child, Cover, Detail
     DumbCategory, ExtraInfo, Fan, Item, LeafA, LoopX, LoopZ, ManagedModel,
     Member, NamedCategory, Note, Number, Plaything, PointerA, Ranking, Related,
     Report, ReservedName, Tag, TvChef, Valid, X, Food, Eaten, Node, ObjectA, ObjectB,
-    ObjectC, Staff)
+    ObjectC, Staff, StaffTag)
 
 
 class BaseQuerysetTest(TestCase):
@@ -1611,6 +1611,9 @@ class ConditionalTests(BaseQuerysetTest):
         p3_o1 = Staff.objects.create(name="p3", organisation="o1")
         p1_o2 = Staff.objects.create(name="p1", organisation="o2")
 
+        StaffTag.objects.create(staff=p1_o1, tag=t1)
+        StaffTag.objects.create(staff=p1_o1, tag=t1)
+
         celeb1 = Celebrity.objects.create(name="c1")
         celeb2 = Celebrity.objects.create(name="c2")
 
@@ -1713,6 +1716,10 @@ class ConditionalTests(BaseQuerysetTest):
                 Celebrity.objects.filter(fan__in=[self.fan1, self.fan2, self.fan3]).\
                     distinct('name').order_by('name'),
                 ['<Celebrity: c1>', '<Celebrity: c2>'],
+            ),
+            (
+                StaffTag.objects.distinct('staff','tag'),
+                ['<StaffTag: t1 -> p1>'],
             ),
         )
 
