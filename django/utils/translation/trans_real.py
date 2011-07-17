@@ -4,10 +4,13 @@ import locale
 import os
 import re
 import sys
-import warnings
 import gettext as gettext_module
-from cStringIO import StringIO
 from threading import local
+
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
 from django.utils.importlib import import_module
 from django.utils.safestring import mark_safe, SafeData
@@ -30,9 +33,9 @@ CONTEXT_SEPARATOR = u"\x04"
 
 # Format of Accept-Language header values. From RFC 2616, section 14.4 and 3.9.
 accept_language_re = re.compile(r'''
-        ([A-Za-z]{1,8}(?:-[A-Za-z]{1,8})*|\*)   # "en", "en-au", "x-y-z", "*"
-        (?:;q=(0(?:\.\d{,3})?|1(?:.0{,3})?))?   # Optional "q=1.00", "q=0.8"
-        (?:\s*,\s*|$)                            # Multiple accepts per header.
+        ([A-Za-z]{1,8}(?:-[A-Za-z]{1,8})*|\*)         # "en", "en-au", "x-y-z", "*"
+        (?:\s*;\s*q=(0(?:\.\d{,3})?|1(?:.0{,3})?))?   # Optional "q=1.00", "q=0.8"
+        (?:\s*,\s*|$)                                 # Multiple accepts per header.
         ''', re.VERBOSE)
 
 language_code_prefix_re = re.compile(r'^/([\w-]+)/')

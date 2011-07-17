@@ -1,8 +1,9 @@
-from django.contrib import admin
 from django import forms
-from django.contrib.admin.validation import validate, validate_inline, \
-                                            ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
+
+from django.contrib import admin
+from django.contrib.admin.validation import validate, validate_inline
 
 from models import Song, Book, Album, TwoAlbumFKAndAnE, State, City
 
@@ -92,9 +93,21 @@ class ValidationTestCase(TestCase):
             inlines = [SongInline]
 
         self.assertRaisesMessage(ImproperlyConfigured,
-            "SongInline cannot exclude the field 'album' - this is the foreign key to the parent model Album.",
+            "SongInline cannot exclude the field 'album' - this is the foreign key to the parent model admin_validation.Album.",
             validate,
             AlbumAdmin, Album)
+
+    def test_app_label_in_admin_validation(self):
+        """
+        Regression test for #15669 - Include app label in admin validation messages
+        """
+        class RawIdNonexistingAdmin(admin.ModelAdmin):
+            raw_id_fields = ('nonexisting',)
+
+        self.assertRaisesMessage(ImproperlyConfigured,
+            "'RawIdNonexistingAdmin.raw_id_fields' refers to field 'nonexisting' that is missing from model 'admin_validation.Album'.",
+            validate,
+            RawIdNonexistingAdmin, Album)
 
     def test_fk_exclusion(self):
         """
