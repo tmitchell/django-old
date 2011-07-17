@@ -357,10 +357,14 @@ query spans multiple tables, it's possible to get duplicate results when a
 ``QuerySet`` is evaluated. That's when you'd use ``distinct()``.
 
 .. versionadded:: 1.4
-   ``distinct()`` takes optional positional arguments, ``*fields``, which specify
+   ``distinct()`` takes optional positional arguments ``*fields``, which specify
    field names to which the ``DISTINCT`` should be limited. This translates to
    a ``SELECT DISTINCT ON`` SQL query. Note that this ``DISTINCT ON`` query is
    only available in PostgreSQL.
+
+.. note::
+    When optional ``*fields`` are given, you will have to add an :meth:`order_by`
+    call with the same field names as the leftmost arguments.
 
 .. note::
     Any fields used in an :meth:`order_by` call are included in the SQL

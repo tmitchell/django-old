@@ -1560,11 +1560,11 @@ class Query(object):
 
     def add_distinct_fields(self, field_names):
         self.distinct_fields = []
-        opts = self.get_meta()
+        options = self.get_meta()
 
         for name in field_names:
             field, source, opts, join_list, last, _ = self.setup_joins(
-                name.split(LOOKUP_SEP), opts, self.get_initial_alias(), False)
+                name.split(LOOKUP_SEP), options, self.get_initial_alias(), False)
             self.distinct_fields.append(field.column)
 
     def add_fields(self, field_names, allow_m2m=True):
