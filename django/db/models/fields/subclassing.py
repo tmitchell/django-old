@@ -1,21 +1,21 @@
 """
-Convenience routines for creating non-trivial Field subclasses.
+Convenience routines for creating non-trivial Field subclasses, as well as
+backwards compatibility utilities.
 
 Add SubfieldBase as the __metaclass__ for your Field subclass, implement
 to_python() and the other necessary methods and everything will work seamlessly.
 """
 
-from django.utils.maxlength import LegacyMaxlength
-
-class SubfieldBase(LegacyMaxlength):
+class SubfieldBase(type):
     """
     A metaclass for custom Field subclasses. This ensures the model's attribute
     has the descriptor protocol attached to it.
     """
-    def __new__(cls, base, name, attrs):
-        new_class = super(SubfieldBase, cls).__new__(cls, base, name, attrs)
+    def __new__(cls, name, bases, attrs):
+        new_class = super(SubfieldBase, cls).__new__(cls, name, bases, attrs)
         new_class.contribute_to_class = make_contrib(
-                attrs.get('contribute_to_class'))
+            new_class, attrs.get('contribute_to_class')
+        )
         return new_class
 
 class Creator(object):
@@ -28,12 +28,12 @@ class Creator(object):
     def __get__(self, obj, type=None):
         if obj is None:
             raise AttributeError('Can only be accessed via an instance.')
-        return obj.__dict__[self.field.name]        
+        return obj.__dict__[self.field.name]
 
     def __set__(self, obj, value):
         obj.__dict__[self.field.name] = self.field.to_python(value)
 
-def make_contrib(func=None):
+def make_contrib(superclass, func=None):
     """
     Returns a suitable contribute_to_class() method for the Field subclass.
 
@@ -46,8 +46,7 @@ def make_contrib(func=None):
         if func:
             func(self, cls, name)
         else:
-            super(self.__class__, self).contribute_to_class(cls, name)
+            super(superclass, self).contribute_to_class(cls, name)
         setattr(cls, self.name, Creator(self))
 
     return contribute_to_class
-

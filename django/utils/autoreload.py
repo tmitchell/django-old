@@ -28,7 +28,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os, sys, time
+import os, sys, time, signal
 
 try:
     import thread
@@ -42,32 +42,60 @@ try:
 except ImportError:
     pass
 
+try:
+    import termios
+except ImportError:
+    termios = None
 
 RUN_RELOADER = True
 
+_mtimes = {}
+_win = (sys.platform == "win32")
+
+def code_changed():
+    global _mtimes, _win
+    for filename in filter(lambda v: v, map(lambda m: getattr(m, "__file__", None), sys.modules.values())):
+        if filename.endswith(".pyc") or filename.endswith(".pyo"):
+            filename = filename[:-1]
+        if not os.path.exists(filename):
+            continue # File might be in an egg, so it can't be reloaded.
+        stat = os.stat(filename)
+        mtime = stat.st_mtime
+        if _win:
+            mtime -= stat.st_ctime
+        if filename not in _mtimes:
+            _mtimes[filename] = mtime
+            continue
+        if mtime != _mtimes[filename]:
+            _mtimes = {}
+            return True
+    return False
+
+def ensure_echo_on():
+    if termios:
+        fd = sys.stdin
+        if fd.isatty():
+            attr_list = termios.tcgetattr(fd)
+            if not attr_list[3] & termios.ECHO:
+                attr_list[3] |= termios.ECHO
+                if hasattr(signal, 'SIGTTOU'):
+                    old_handler = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+                else:
+                    old_handler = None
+                termios.tcsetattr(fd, termios.TCSANOW, attr_list)
+                if old_handler is not None:
+                    signal.signal(signal.SIGTTOU, old_handler)
+
 def reloader_thread():
-    mtimes = {}
-    win = (sys.platform == "win32")
+    ensure_echo_on()
     while RUN_RELOADER:
-        for filename in filter(lambda v: v, map(lambda m: getattr(m, "__file__", None), sys.modules.values())):
-            if filename.endswith(".pyc") or filename.endswith("*.pyo"):
-                filename = filename[:-1]
-            if not os.path.exists(filename):
-                continue # File might be in an egg, so it can't be reloaded.
-            stat = os.stat(filename)
-            mtime = stat.st_mtime
-            if win:
-                mtime -= stat.st_ctime
-            if filename not in mtimes:
-                mtimes[filename] = mtime
-                continue
-            if mtime != mtimes[filename]:
-                sys.exit(3) # force reload
+        if code_changed():
+            sys.exit(3) # force reload
         time.sleep(1)
 
 def restart_with_reloader():
     while True:
-        args = [sys.executable] + sys.argv
+        args = [sys.executable] + ['-W%s' % o for o in sys.warnoptions] + sys.argv
         if sys.platform == "win32":
             args = ['"%s"' % arg for arg in args]
         new_environ = os.environ.copy()
@@ -76,12 +104,8 @@ def restart_with_reloader():
         if exit_code != 3:
             return exit_code
 
-def main(main_func, args=None, kwargs=None):
+def python_reloader(main_func, args, kwargs):
     if os.environ.get("RUN_MAIN") == "true":
-        if args is None:
-            args = ()
-        if kwargs is None:
-            kwargs = {}
         thread.start_new_thread(main_func, args, kwargs)
         try:
             reloader_thread()
@@ -92,3 +116,24 @@ def main(main_func, args=None, kwargs=None):
             sys.exit(restart_with_reloader())
         except KeyboardInterrupt:
             pass
+
+def jython_reloader(main_func, args, kwargs):
+    from _systemrestart import SystemRestart
+    thread.start_new_thread(main_func, args)
+    while True:
+        if code_changed():
+            raise SystemRestart
+        time.sleep(1)
+
+
+def main(main_func, args=None, kwargs=None):
+    if args is None:
+        args = ()
+    if kwargs is None:
+        kwargs = {}
+    if sys.platform.startswith('java'):
+        reloader = jython_reloader
+    else:
+        reloader = python_reloader
+    reloader(main_func, args, kwargs)
+

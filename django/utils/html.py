@@ -13,7 +13,7 @@ LEADING_PUNCTUATION  = ['(', '<', '&lt;']
 TRAILING_PUNCTUATION = ['.', ',', ')', '>', '\n', '&gt;']
 
 # List of possible strings used for bullets in bulleted lists.
-DOTS = ['&middot;', '*', '\xe2\x80\xa2', '&#149;', '&bull;', '&#8226;']
+DOTS = [u'&middot;', u'*', u'\u2022', u'&#149;', u'&bull;', u'&#8226;']
 
 unencoded_ampersands_re = re.compile(r'&(?!(\w+|#\d+);)')
 word_split_re = re.compile(r'(\s+)')
@@ -28,9 +28,36 @@ trailing_empty_content_re = re.compile(r'(?:<p>(?:&nbsp;|\s|<br \/>)*?</p>\s*)+\
 del x # Temporary variable
 
 def escape(html):
-    """Returns the given HTML with ampersands, quotes and carets encoded."""
+    """
+    Returns the given HTML with ampersands, quotes and angle brackets encoded.
+    """
     return mark_safe(force_unicode(html).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;'))
 escape = allow_lazy(escape, unicode)
+
+_base_js_escapes = (
+    ('\\', r'\u005C'),
+    ('\'', r'\u0027'),
+    ('"', r'\u0022'),
+    ('>', r'\u003E'),
+    ('<', r'\u003C'),
+    ('&', r'\u0026'),
+    ('=', r'\u003D'),
+    ('-', r'\u002D'),
+    (';', r'\u003B'),
+    (u'\u2028', r'\u2028'),
+    (u'\u2029', r'\u2029')
+)
+
+# Escape every ASCII character with a value less than 32.
+_js_escapes = (_base_js_escapes +
+               tuple([('%c' % z, '\\u%04X' % z) for z in range(32)]))
+
+def escapejs(value):
+    """Hex encodes characters for use in JavaScript strings."""
+    for bad, good in _js_escapes:
+        value = mark_safe(force_unicode(value).replace(bad, good))
+    return value
+escapejs = allow_lazy(escapejs, unicode)
 
 def conditional_escape(html):
     """
@@ -46,9 +73,9 @@ def linebreaks(value, autoescape=False):
     value = re.sub(r'\r\n|\r|\n', '\n', force_unicode(value)) # normalize newlines
     paras = re.split('\n{2,}', value)
     if autoescape:
-        paras = [u'<p>%s</p>' % escape(p.strip()).replace('\n', '<br />') for p in paras]
+        paras = [u'<p>%s</p>' % escape(p).replace('\n', '<br />') for p in paras]
     else:
-        paras = [u'<p>%s</p>' % p.strip().replace('\n', '<br />') for p in paras]
+        paras = [u'<p>%s</p>' % p.replace('\n', '<br />') for p in paras]
     return u'\n\n'.join(paras)
 linebreaks = allow_lazy(linebreaks, unicode)
 
@@ -94,7 +121,9 @@ def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):
     words = word_split_re.split(force_unicode(text))
     nofollow_attr = nofollow and ' rel="nofollow"' or ''
     for i, word in enumerate(words):
-        match = punctuation_re.match(word)
+        match = None
+        if '.' in word or '@' in word or ':' in word:
+            match = punctuation_re.match(word)
         if match:
             lead, middle, trail = match.groups()
             # Make URL we want to point to.
@@ -102,7 +131,7 @@ def urlize(text, trim_url_limit=None, nofollow=False, autoescape=False):
             if middle.startswith('http://') or middle.startswith('https://'):
                 url = urlquote(middle, safe='/&=:;#?+*')
             elif middle.startswith('www.') or ('@' not in middle and \
-                    len(middle) > 0 and middle[0] in string.ascii_letters + string.digits and \
+                    middle and middle[0] in string.ascii_letters + string.digits and \
                     (middle.endswith('.org') or middle.endswith('.net') or middle.endswith('.com'))):
                 url = urlquote('http://%s' % middle, safe='/&=:;#?+*')
             elif '@' in middle and not ':' in middle and simple_email_re.match(middle):
@@ -151,13 +180,13 @@ def clean_html(text):
     text = html_gunk_re.sub('', text)
     # Convert hard-coded bullets into HTML unordered lists.
     def replace_p_tags(match):
-        s = match.group().replace('</p>', '</li>')
+        s = match.group().replace(u'</p>', u'</li>')
         for d in DOTS:
-            s = s.replace('<p>%s' % d, '<li>')
+            s = s.replace(u'<p>%s' % d, u'<li>')
         return u'<ul>\n%s\n</ul>' % s
     text = hard_coded_bullets_re.sub(replace_p_tags, text)
     # Remove stuff like "<p>&nbsp;&nbsp;</p>", but only if it's at the bottom
     # of the text.
-    text = trailing_empty_content_re.sub('', text)
+    text = trailing_empty_content_re.sub(u'', text)
     return text
 clean_html = allow_lazy(clean_html, unicode)

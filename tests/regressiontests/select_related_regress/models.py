@@ -28,33 +28,59 @@ class Connection(models.Model):
     def __unicode__(self):
         return u"%s to %s" % (self.start, self.end)
 
-__test__ = {'API_TESTS': """
-Regression test for bug #7110. When using select_related(), we must query the
-Device and Building tables using two different aliases (each) in order to
-differentiate the start and end Connection fields. The net result is that both
-the "connections = ..." queries here should give the same results.
+# Another non-tree hierarchy that exercises code paths similar to the above
+# example, but in a slightly different configuration.
+class TUser(models.Model):
+    name = models.CharField(max_length=200)
 
->>> b=Building.objects.create(name='101')
->>> dev1=Device.objects.create(name="router", building=b)
->>> dev2=Device.objects.create(name="switch", building=b)
->>> dev3=Device.objects.create(name="server", building=b)
->>> port1=Port.objects.create(port_number='4',device=dev1)
->>> port2=Port.objects.create(port_number='7',device=dev2)
->>> port3=Port.objects.create(port_number='1',device=dev3)
->>> c1=Connection.objects.create(start=port1, end=port2)
->>> c2=Connection.objects.create(start=port2, end=port3)
+class Person(models.Model):
+    user = models.ForeignKey(TUser, unique=True)
 
->>> connections=Connection.objects.filter(start__device__building=b, end__device__building=b).order_by('id')
->>> [(c.id, unicode(c.start), unicode(c.end)) for c in connections]
-[(1, u'router/4', u'switch/7'), (2, u'switch/7', u'server/1')]
+class Organizer(models.Model):
+    person = models.ForeignKey(Person)
 
->>> connections=Connection.objects.filter(start__device__building=b, end__device__building=b).select_related().order_by('id')
->>> [(c.id, unicode(c.start), unicode(c.end)) for c in connections]
-[(1, u'router/4', u'switch/7'), (2, u'switch/7', u'server/1')]
+class Student(models.Model):
+    person = models.ForeignKey(Person)
 
-# This final query should only join seven tables (port, device and building
-# twice each, plus connection once).
->>> connections.query.count_active_tables()
-7
+class Class(models.Model):
+    org = models.ForeignKey(Organizer)
 
-"""}
+class Enrollment(models.Model):
+    std = models.ForeignKey(Student)
+    cls = models.ForeignKey(Class)
+
+# Models for testing bug #8036.
+class Country(models.Model):
+    name = models.CharField(max_length=50)
+
+class State(models.Model):
+    name = models.CharField(max_length=50)
+    country = models.ForeignKey(Country)
+
+class ClientStatus(models.Model):
+    name = models.CharField(max_length=50)
+
+class Client(models.Model):
+    name = models.CharField(max_length=50)
+    state = models.ForeignKey(State, null=True)
+    status = models.ForeignKey(ClientStatus)
+
+class SpecialClient(Client):
+    value = models.IntegerField()
+
+# Some model inheritance exercises
+class Parent(models.Model):
+    name = models.CharField(max_length=10)
+
+    def __unicode__(self):
+        return self.name
+
+class Child(Parent):
+    value = models.IntegerField()
+
+class Item(models.Model):
+    name = models.CharField(max_length=10)
+    child = models.ForeignKey(Child, null=True)
+
+    def __unicode__(self):
+        return self.name

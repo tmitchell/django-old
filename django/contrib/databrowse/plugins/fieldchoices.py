@@ -6,7 +6,6 @@ from django.shortcuts import render_to_response
 from django.utils.text import capfirst
 from django.utils.encoding import smart_str, force_unicode
 from django.utils.safestring import mark_safe
-from django.views.generic import date_based
 import urllib
 
 class FieldChoicePlugin(DatabrowsePlugin):
@@ -62,7 +61,7 @@ class FieldChoicePlugin(DatabrowsePlugin):
     def homepage_view(self, request):
         easy_model = EasyModel(self.site, self.model)
         field_list = self.fields.values()
-        field_list.sort(lambda x, y: cmp(x.verbose_name, y.verbose_name))
+        field_list.sort(key=lambda k: k.verbose_name)
         return render_to_response('databrowse/fieldchoice_homepage.html', {'root_url': self.site.root_url, 'model': easy_model, 'field_list': field_list})
 
     def field_view(self, request, field, value=None):

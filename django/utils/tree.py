@@ -3,7 +3,7 @@ A class for storing a tree graph. Primarily used for filter constructs in the
 ORM.
 """
 
-from copy import deepcopy
+import copy
 
 class Node(object):
     """
@@ -58,8 +58,8 @@ class Node(object):
         """
         obj = Node(connector=self.connector, negated=self.negated)
         obj.__class__ = self.__class__
-        obj.children = deepcopy(self.children, memodict)
-        obj.subtree_parents = deepcopy(self.subtree_parents, memodict)
+        obj.children = copy.deepcopy(self.children, memodict)
+        obj.subtree_parents = copy.deepcopy(self.subtree_parents, memodict)
         return obj
 
     def __len__(self):
@@ -87,7 +87,7 @@ class Node(object):
         Otherwise, the whole tree is pushed down one level and a new root
         connector is created, connecting the existing tree and the new node.
         """
-        if node in self.children:
+        if node in self.children and conn_type == self.connector:
             return
         if len(self.children) < 2:
             self.connector = conn_type

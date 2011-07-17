@@ -1,6 +1,7 @@
 # coding: utf-8
 from django.db import models
 
+
 CHOICES = (
     (1, 'first'),
     (2, 'second'),
@@ -27,46 +28,32 @@ class Movie(models.Model):
     name = models.CharField(max_length=60)
 
 class Party(models.Model):
-    when = models.DateField()
+    when = models.DateField(null=True)
 
-__test__ = {'API_TESTS': """
-(NOTE: Part of the regression test here is merely parsing the model
-declaration. The verbose_name, in particular, did not always work.)
+class Event(models.Model):
+    when = models.DateTimeField()
 
-An empty choice field should return None for the display name.
+class Department(models.Model):
+    id = models.PositiveIntegerField(primary_key=True)
+    name = models.CharField(max_length=200)
 
->>> from datetime import datetime
->>> a = Article(headline="Look at me!", pub_date=datetime.now())
->>> a.save()
->>> a.get_status_display() is None
-True
+    def __unicode__(self):
+        return self.name
 
-Empty strings should be returned as Unicode
->>> a2 = Article.objects.get(pk=a.id)
->>> a2.misc_data
-u''
+class Worker(models.Model):
+    department = models.ForeignKey(Department)
+    name = models.CharField(max_length=200)
 
-# TextFields can hold more than 4000 characters (this was broken in Oracle).
->>> a3 = Article(headline="Really, really big", pub_date=datetime.now())
->>> a3.article_text = "ABCDE" * 1000
->>> a3.save()
->>> a4 = Article.objects.get(pk=a3.id)
->>> len(a4.article_text)
-5000
+    def __unicode__(self):
+        return self.name
 
-# #659 regression test
->>> import datetime
->>> p = Party.objects.create(when = datetime.datetime(1999, 12, 31))
->>> p = Party.objects.create(when = datetime.datetime(1998, 12, 31))
->>> p = Party.objects.create(when = datetime.datetime(1999, 1, 1))
->>> [p.when for p in Party.objects.filter(when__month = 2)]
-[]
->>> [p.when for p in Party.objects.filter(when__month = 1)]
-[datetime.date(1999, 1, 1)]
->>> [p.when for p in Party.objects.filter(when__month = 12)]
-[datetime.date(1999, 12, 31), datetime.date(1998, 12, 31)]
->>> [p.when for p in Party.objects.filter(when__year = 1998)]
-[datetime.date(1998, 12, 31)]
+class BrokenUnicodeMethod(models.Model):
+    name = models.CharField(max_length=7)
 
-"""
-}
+    def __unicode__(self):
+        # Intentionally broken (trying to insert a unicode value into a str
+        # object).
+        return 'Názov: %s' % self.name
+
+class NonAutoPK(models.Model):
+    name = models.CharField(max_length=10, primary_key=True)

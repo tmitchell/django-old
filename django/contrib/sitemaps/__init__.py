@@ -1,4 +1,6 @@
-from django.core import urlresolvers
+from django.contrib.sites.models import Site
+from django.core import urlresolvers, paginator
+from django.core.exceptions import ImproperlyConfigured
 import urllib
 
 PING_URL = "http://www.google.com/webmasters/tools/ping"
@@ -33,7 +35,11 @@ def ping_google(sitemap_url=None, ping_url=PING_URL):
     params = urllib.urlencode({'sitemap':url})
     urllib.urlopen("%s?%s" % (ping_url, params))
 
-class Sitemap:
+class Sitemap(object):
+    # This limit is defined by Google. See the index documentation at
+    # http://sitemaps.org/protocol.php#index.
+    limit = 50000
+
     def __get(self, name, obj, default=None):
         try:
             attr = getattr(self, name)
@@ -49,26 +55,40 @@ class Sitemap:
     def location(self, obj):
         return obj.get_absolute_url()
 
-    def get_urls(self):
-        from django.contrib.sites.models import Site
-        current_site = Site.objects.get_current()
+    def _get_paginator(self):
+        if not hasattr(self, "_paginator"):
+            self._paginator = paginator.Paginator(self.items(), self.limit)
+        return self._paginator
+    paginator = property(_get_paginator)
+
+    def get_urls(self, page=1, site=None):
+        if site is None:
+            if Site._meta.installed:
+                try:
+                    site = Site.objects.get_current()
+                except Site.DoesNotExist:
+                    pass
+            if site is None:
+                raise ImproperlyConfigured("In order to use Sitemaps you must either use the sites framework or pass in a Site or RequestSite object in your view code.")
+
         urls = []
-        for item in self.items():
-            loc = "http://%s%s" % (current_site.domain, self.__get('location', item))
+        for item in self.paginator.page(page).object_list:
+            loc = "http://%s%s" % (site.domain, self.__get('location', item))
+            priority = self.__get('priority', item, None)
             url_info = {
+                'item':       item,
                 'location':   loc,
                 'lastmod':    self.__get('lastmod', item, None),
                 'changefreq': self.__get('changefreq', item, None),
-                'priority':   self.__get('priority', item, None)
+                'priority':   str(priority is not None and priority or ''),
             }
             urls.append(url_info)
         return urls
 
 class FlatPageSitemap(Sitemap):
     def items(self):
-        from django.contrib.sites.models import Site
         current_site = Site.objects.get_current()
-        return current_site.flatpage_set.all()
+        return current_site.flatpage_set.filter(registration_required=False)
 
 class GenericSitemap(Sitemap):
     priority = None

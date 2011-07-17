@@ -1,9 +1,10 @@
+# coding: utf-8
 from os import path
 
 from django.conf.urls.defaults import *
 
-from models import *
 import views
+
 
 base_dir = path.dirname(path.abspath(__file__))
 media_dir = path.join(base_dir, 'media')
@@ -14,35 +15,46 @@ js_info_dict = {
     'packages': ('regressiontests.views',),
 }
 
-date_based_info_dict = { 
-    'queryset': Article.objects.all(), 
-    'date_field': 'date_created', 
-    'month_format': '%m', 
-} 
+js_info_dict_english_translation = {
+    'domain': 'djangojs',
+    'packages': ('regressiontests.views.app0',),
+}
+
+js_info_dict_multi_packages1 = {
+    'domain': 'djangojs',
+    'packages': ('regressiontests.views.app1', 'regressiontests.views.app2'),
+}
+
+js_info_dict_multi_packages2 = {
+    'domain': 'djangojs',
+    'packages': ('regressiontests.views.app3', 'regressiontests.views.app4'),
+}
 
 urlpatterns = patterns('',
     (r'^$', views.index_page),
-    
+
     # Default views
     (r'^shortcut/(\d+)/(.*)/$', 'django.views.defaults.shortcut'),
     (r'^non_existing_url/', 'django.views.defaults.page_not_found'),
     (r'^server_error/', 'django.views.defaults.server_error'),
-    
+
+    # a view that raises an exception for the debug view
+    (r'^raises/$', views.raises),
+    (r'^raises404/$', views.raises404),
+
     # i18n views
-    (r'^i18n/', include('django.conf.urls.i18n')),    
+    (r'^i18n/', include('django.conf.urls.i18n')),
     (r'^jsi18n/$', 'django.views.i18n.javascript_catalog', js_info_dict),
-    
+    (r'^jsi18n_english_translation/$', 'django.views.i18n.javascript_catalog', js_info_dict_english_translation),
+    (r'^jsi18n_multi_packages1/$', 'django.views.i18n.javascript_catalog', js_info_dict_multi_packages1),
+    (r'^jsi18n_multi_packages2/$', 'django.views.i18n.javascript_catalog', js_info_dict_multi_packages2),
+
     # Static views
     (r'^site_media/(?P<path>.*)$', 'django.views.static.serve', {'document_root': media_dir}),
-    
-	# Date-based generic views
-    (r'^date_based/object_detail/(?P<year>\d{4})/(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<slug>[-\w]+)/$', 
-        'django.views.generic.date_based.object_detail', 
-        dict(slug_field='slug', **date_based_info_dict)), 
-    (r'^date_based/object_detail/(?P<year>\d{4})/(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<slug>[-\w]+)/allow_future/$', 
-        'django.views.generic.date_based.object_detail', 
-        dict(allow_future=True, slug_field='slug', **date_based_info_dict)), 
-    (r'^date_based/archive_month/(?P<year>\d{4})/(?P<month>\d{1,2})/$', 
-        'django.views.generic.date_based.archive_month', 
-        date_based_info_dict),     
+)
+
+urlpatterns += patterns('regressiontests.views.views',
+    url(r'view_exception/(?P<n>\d+)/$', 'view_exception', name='view_exception'),
+    url(r'template_exception/(?P<n>\d+)/$', 'template_exception', name='template_exception'),
+    url(r'^raises_template_does_not_exist/$', 'raises_template_does_not_exist', name='raises_template_does_not_exist'),
 )

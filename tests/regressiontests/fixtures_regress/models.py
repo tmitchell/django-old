@@ -1,14 +1,19 @@
 from django.db import models
 from django.contrib.auth.models import User
-from django.conf import settings
-import os
+
 
 class Animal(models.Model):
     name = models.CharField(max_length=150)
     latin_name = models.CharField(max_length=150)
+    count = models.IntegerField()
+    weight = models.FloatField()
+
+    # use a non-default name for the default manager
+    specimens = models.Manager()
 
     def __unicode__(self):
-        return self.common_name
+        return self.name
+
 
 class Plant(models.Model):
     name = models.CharField(max_length=150)
@@ -22,12 +27,8 @@ class Stuff(models.Model):
     owner = models.ForeignKey(User, null=True)
 
     def __unicode__(self):
-        # Oracle doesn't distinguish between None and the empty string.
-        # This hack makes the test case pass using Oracle.
-        name = self.name
-        if settings.DATABASE_ENGINE == 'oracle' and name == u'':
-            name = None
-        return unicode(name) + u' is owned by ' + unicode(self.owner)
+        return unicode(self.name) + u' is owned by ' + unicode(self.owner)
+
 
 class Absolute(models.Model):
     name = models.CharField(max_length=40)
@@ -38,100 +39,186 @@ class Absolute(models.Model):
         super(Absolute, self).__init__(*args, **kwargs)
         Absolute.load_count += 1
 
+
 class Parent(models.Model):
     name = models.CharField(max_length=10)
+
+    class Meta:
+        ordering = ('id',)
+
 
 class Child(Parent):
     data = models.CharField(max_length=10)
 
-# Models to regresison check #7572
+
+# Models to regression test #7572
 class Channel(models.Model):
     name = models.CharField(max_length=255)
+
 
 class Article(models.Model):
     title = models.CharField(max_length=255)
     channels = models.ManyToManyField(Channel)
-    
+
     class Meta:
         ordering = ('id',)
 
-__test__ = {'API_TESTS':"""
->>> from django.core import management
 
-# Load a fixture that uses PK=1
->>> management.call_command('loaddata', 'sequence', verbosity=0)
+# Models to regression test #11428
+class Widget(models.Model):
+    name = models.CharField(max_length=255)
 
-# Create a new animal. Without a sequence reset, this new object
-# will take a PK of 1 (on Postgres), and the save will fail.
-# This is a regression test for ticket #3790.
->>> animal = Animal(name='Platypus', latin_name='Ornithorhynchus anatinus')
->>> animal.save()
+    class Meta:
+        ordering = ('name',)
 
-###############################################
-# Regression test for ticket #4558 -- pretty printing of XML fixtures
-# doesn't affect parsing of None values.
+    def __unicode__(self):
+        return self.name
 
-# Load a pretty-printed XML fixture with Nulls.
->>> management.call_command('loaddata', 'pretty.xml', verbosity=0)
->>> Stuff.objects.all()
-[<Stuff: None is owned by None>]
 
-###############################################
-# Regression test for ticket #6436 --
-# os.path.join will throw away the initial parts of a path if it encounters
-# an absolute path. This means that if a fixture is specified as an absolute path,
-# we need to make sure we don't discover the absolute path in every fixture directory.
+class WidgetProxy(Widget):
+    class Meta:
+        proxy = True
 
->>> load_absolute_path = os.path.join(os.path.dirname(__file__), 'fixtures', 'absolute.json')
->>> management.call_command('loaddata', load_absolute_path, verbosity=0)
->>> Absolute.load_count
-1
 
-###############################################
-# Test for ticket #4371 -- fixture loading fails silently in testcases
-# Validate that error conditions are caught correctly
+# Check for forward references in FKs and M2Ms with natural keys
+class TestManager(models.Manager):
+    def get_by_natural_key(self, key):
+        return self.get(name=key)
 
-# redirect stderr for the next few tests...
->>> import sys
->>> savestderr = sys.stderr
->>> sys.stderr = sys.stdout
 
-# Loading data of an unknown format should fail
->>> management.call_command('loaddata', 'bad_fixture1.unkn', verbosity=0)
-Problem installing fixture 'bad_fixture1': unkn is not a known serialization format.
+class Store(models.Model):
+    objects = TestManager()
+    name = models.CharField(max_length=255)
 
-# Loading a fixture file with invalid data using explicit filename
->>> management.call_command('loaddata', 'bad_fixture2.xml', verbosity=0)
-No fixture data found for 'bad_fixture2'. (File format may be invalid.)
+    class Meta:
+        ordering = ('name',)
 
-# Loading a fixture file with invalid data without file extension
->>> management.call_command('loaddata', 'bad_fixture2', verbosity=0)
-No fixture data found for 'bad_fixture2'. (File format may be invalid.)
+    def __unicode__(self):
+        return self.name
 
->>> sys.stderr = savestderr
+    def natural_key(self):
+        return (self.name,)
 
-###############################################
-# Test for ticket #7565 -- PostgreSQL sequence resetting checks shouldn't
-# ascend to parent models when inheritance is used (since they are treated
-# individually).
 
->>> management.call_command('loaddata', 'model-inheritance.json', verbosity=0)
+class Person(models.Model):
+    objects = TestManager()
+    name = models.CharField(max_length=255)
 
-###############################################
-# Test for ticket #7572 -- MySQL has a problem if the same connection is 
-# used to create tables, load data, and then query over that data.
-# To compensate, we close the connection after running loaddata.
-# This ensures that a new connection is opened when test queries are issued.
+    class Meta:
+        ordering = ('name',)
 
->>> management.call_command('loaddata', 'big-fixture.json', verbosity=0)
+    def __unicode__(self):
+        return self.name
 
->>> articles = Article.objects.exclude(id=9)
->>> articles.values_list('id', flat=True)
-[1, 2, 3, 4, 5, 6, 7, 8]
+    # Person doesn't actually have a dependency on store, but we need to define
+    # one to test the behaviour of the dependency resolution algorithm.
+    def natural_key(self):
+        return (self.name,)
+    natural_key.dependencies = ['fixtures_regress.store']
 
-# Just for good measure, run the same query again. Under the influence of
-# ticket #7572, this will give a different result to the previous call.
->>> articles.values_list('id', flat=True)
-[1, 2, 3, 4, 5, 6, 7, 8]
 
-"""}
+class Book(models.Model):
+    name = models.CharField(max_length=255)
+    author = models.ForeignKey(Person)
+    stores = models.ManyToManyField(Store)
+
+    class Meta:
+        ordering = ('name',)
+
+    def __unicode__(self):
+        return u'%s by %s (available at %s)' % (
+            self.name,
+            self.author.name,
+            ', '.join(s.name for s in self.stores.all())
+        )
+
+
+class NKManager(models.Manager):
+    def get_by_natural_key(self, data):
+        return self.get(data=data)
+
+
+class NKChild(Parent):
+    data = models.CharField(max_length=10, unique=True)
+    objects = NKManager()
+
+    def natural_key(self):
+        return self.data
+
+    def __unicode__(self):
+        return u'NKChild %s:%s' % (self.name, self.data)
+
+
+class RefToNKChild(models.Model):
+    text = models.CharField(max_length=10)
+    nk_fk = models.ForeignKey(NKChild, related_name='ref_fks')
+    nk_m2m = models.ManyToManyField(NKChild, related_name='ref_m2ms')
+
+    def __unicode__(self):
+        return u'%s: Reference to %s [%s]' % (
+            self.text,
+            self.nk_fk,
+            ', '.join(str(o) for o in self.nk_m2m.all())
+        )
+
+
+# ome models with pathological circular dependencies
+class Circle1(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle2']
+
+
+class Circle2(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle1']
+
+
+class Circle3(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle3']
+
+
+class Circle4(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle5']
+
+
+class Circle5(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle6']
+
+
+class Circle6(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.circle4']
+
+
+class ExternalDependency(models.Model):
+    name = models.CharField(max_length=255)
+
+    def natural_key(self):
+        return self.name
+    natural_key.dependencies = ['fixtures_regress.book']
+
+
+# Model for regression test of #11101
+class Thingy(models.Model):
+    name = models.CharField(max_length=255)

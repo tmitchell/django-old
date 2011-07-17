@@ -22,6 +22,10 @@ class Bar(models.Model):
     def __unicode__(self):
         return u"%s the bar" % self.place.name
 
+class UndergroundBar(models.Model):
+    place = models.OneToOneField(Place, null=True)
+    serves_cocktails = models.BooleanField()
+
 class Favorites(models.Model):
     name = models.CharField(max_length = 50)
     restaurants = models.ManyToManyField(Restaurant)
@@ -29,63 +33,11 @@ class Favorites(models.Model):
     def __unicode__(self):
         return u"Favorites for %s" % self.name
 
-__test__ = {'API_TESTS':"""
-# Regression test for #1064 and #1506: Check that we create models via the m2m
-# relation if the remote model has a OneToOneField.
->>> p1 = Place(name='Demon Dogs', address='944 W. Fullerton')
->>> p1.save()
->>> r = Restaurant(place=p1, serves_hot_dogs=True, serves_pizza=False)
->>> r.save()
->>> f = Favorites(name = 'Fred')
->>> f.save()
->>> f.restaurants = [r]
->>> f.restaurants.all()
-[<Restaurant: Demon Dogs the restaurant>]
+class Target(models.Model):
+    pass
 
-# Regression test for #7173: Check that the name of the cache for the 
-# reverse object is correct.
->>> b = Bar(place=p1, serves_cocktails=False)
->>> b.save()
->>> p1.restaurant
-<Restaurant: Demon Dogs the restaurant>
->>> p1.bar
-<Bar: Demon Dogs the bar>
+class Pointer(models.Model):
+    other = models.OneToOneField(Target, primary_key=True)
 
-#
-# Regression test for #6886 (the related-object cache)
-# 
-
-# Look up the objects again so that we get "fresh" objects
->>> p = Place.objects.get(name="Demon Dogs")
->>> r = p.restaurant
-
-# Accessing the related object again returns the exactly same object
->>> p.restaurant is r
-True
-
-# But if we kill the cache, we get a new object
->>> del p._restaurant_cache
->>> p.restaurant is r
-False
-
-# Reassigning the Restaurant object results in an immediate cache update
-# We can't use a new Restaurant because that'll violate one-to-one, but
-# with a new *instance* the is test below will fail if #6886 regresses.
->>> r2 = Restaurant.objects.get(pk=r.pk)
->>> p.restaurant = r2
->>> p.restaurant is r2
-True
-
-# Assigning None fails: Place.restaurant is null=False
->>> p.restaurant = None
-Traceback (most recent call last):
-    ...
-ValueError: Cannot assign None: "Place.restaurant" does not allow null values.
-
-# You also can't assign an object of the wrong type here
->>> p.restaurant = p
-Traceback (most recent call last):
-    ...
-ValueError: Cannot assign "<Place: Demon Dogs the place>": "Place.restaurant" must be a "Restaurant" instance.
-
-"""}
+class Pointer2(models.Model):
+    other = models.OneToOneField(Target)

@@ -7,41 +7,24 @@ a list of all possible variables.
 """
 
 import os
+import re
 import time     # Needed for Windows
+import warnings
+
 from django.conf import global_settings
+from django.utils.functional import LazyObject, empty
+from django.utils import importlib
 
 ENVIRONMENT_VARIABLE = "DJANGO_SETTINGS_MODULE"
 
-class LazySettings(object):
+
+class LazySettings(LazyObject):
     """
     A lazy proxy for either global Django settings or a custom settings object.
     The user can manually configure settings prior to using them. Otherwise,
     Django uses the settings module pointed to by DJANGO_SETTINGS_MODULE.
     """
-    def __init__(self):
-        # _target must be either None or something that supports attribute
-        # access (getattr, hasattr, etc).
-        self._target = None
-
-    def __getattr__(self, name):
-        if self._target is None:
-            self._import_settings()
-        if name == '__members__':
-            # Used to implement dir(obj), for example.
-            return self._target.get_all_members()
-        return getattr(self._target, name)
-
-    def __setattr__(self, name, value):
-        if name == '_target':
-            # Assign directly to self.__dict__, because otherwise we'd call
-            # __setattr__(), which would be an infinite loop.
-            self.__dict__['_target'] = value
-        else:
-            if self._target is None:
-                self._import_settings()
-            setattr(self._target, name, value)
-
-    def _import_settings(self):
+    def _setup(self):
         """
         Load the settings module pointed to by the environment variable. This
         is used the first time we need any settings at all, if the user has not
@@ -56,7 +39,7 @@ class LazySettings(object):
             # problems with Python's interactive help.
             raise ImportError("Settings cannot be imported, because environment variable %s is undefined." % ENVIRONMENT_VARIABLE)
 
-        self._target = Settings(settings_module)
+        self._wrapped = Settings(settings_module)
 
     def configure(self, default_settings=global_settings, **options):
         """
@@ -64,21 +47,36 @@ class LazySettings(object):
         parameter sets where to retrieve any unspecified values from (its
         argument must support attribute access (__getattr__)).
         """
-        if self._target != None:
-            raise RuntimeError, 'Settings already configured.'
+        if self._wrapped is not empty:
+            raise RuntimeError('Settings already configured.')
         holder = UserSettingsHolder(default_settings)
         for name, value in options.items():
             setattr(holder, name, value)
-        self._target = holder
+        self._wrapped = holder
 
+    @property
     def configured(self):
         """
         Returns True if the settings have already been configured.
         """
-        return bool(self._target)
-    configured = property(configured)
+        return self._wrapped is not empty
 
-class Settings(object):
+
+class BaseSettings(object):
+    """
+    Common logic for settings whether set by a module or by the user.
+    """
+    def __setattr__(self, name, value):
+        if name in ("MEDIA_URL", "STATIC_URL") and value and not value.endswith('/'):
+            warnings.warn("If set, %s must end with a slash" % name,
+                          DeprecationWarning)
+        elif name == "ADMIN_MEDIA_PREFIX":
+            warnings.warn("The ADMIN_MEDIA_PREFIX setting has been removed; "
+                          "use STATIC_URL instead.", DeprecationWarning)
+        object.__setattr__(self, name, value)
+
+
+class Settings(BaseSettings):
     def __init__(self, settings_module):
         # update this dict from global settings (but only for ALL_CAPS settings)
         for setting in dir(global_settings):
@@ -89,9 +87,9 @@ class Settings(object):
         self.SETTINGS_MODULE = settings_module
 
         try:
-            mod = __import__(self.SETTINGS_MODULE, {}, {}, [''])
+            mod = importlib.import_module(self.SETTINGS_MODULE)
         except ImportError, e:
-            raise ImportError, "Could not import settings '%s' (Is it on sys.path? Does it have syntax errors?): %s" % (self.SETTINGS_MODULE, e)
+            raise ImportError("Could not import settings '%s' (Is it on sys.path?): %s" % (self.SETTINGS_MODULE, e))
 
         # Settings that should be converted into tuples if they're mistakenly entered
         # as strings.
@@ -109,24 +107,45 @@ class Settings(object):
         new_installed_apps = []
         for app in self.INSTALLED_APPS:
             if app.endswith('.*'):
-                appdir = os.path.dirname(__import__(app[:-2], {}, {}, ['']).__file__)
-                for d in os.listdir(appdir):
-                    if d.isalpha() and os.path.isdir(os.path.join(appdir, d)):
+                app_mod = importlib.import_module(app[:-2])
+                appdir = os.path.dirname(app_mod.__file__)
+                app_subdirs = os.listdir(appdir)
+                app_subdirs.sort()
+                name_pattern = re.compile(r'[a-zA-Z]\w*')
+                for d in app_subdirs:
+                    if name_pattern.match(d) and os.path.isdir(os.path.join(appdir, d)):
                         new_installed_apps.append('%s.%s' % (app[:-2], d))
             else:
                 new_installed_apps.append(app)
         self.INSTALLED_APPS = new_installed_apps
 
-        if hasattr(time, 'tzset'):
+        if hasattr(time, 'tzset') and self.TIME_ZONE:
+            # When we can, attempt to validate the timezone. If we can't find
+            # this file, no check happens and it's harmless.
+            zoneinfo_root = '/usr/share/zoneinfo'
+            if (os.path.exists(zoneinfo_root) and not
+                    os.path.exists(os.path.join(zoneinfo_root, *(self.TIME_ZONE.split('/'))))):
+                raise ValueError("Incorrect timezone setting: %s" % self.TIME_ZONE)
             # Move the time zone info into os.environ. See ticket #2315 for why
             # we don't do this unconditionally (breaks Windows).
             os.environ['TZ'] = self.TIME_ZONE
             time.tzset()
 
-    def get_all_members(self):
-        return dir(self)
+        # Settings are configured, so we can set up the logger if required
+        if self.LOGGING_CONFIG:
+            # First find the logging configuration function ...
+            logging_config_path, logging_config_func_name = self.LOGGING_CONFIG.rsplit('.', 1)
+            logging_config_module = importlib.import_module(logging_config_path)
+            logging_config_func = getattr(logging_config_module, logging_config_func_name)
 
-class UserSettingsHolder(object):
+            # Backwards-compatibility shim for #16288 fix
+            compat_patch_logging_config(self.LOGGING)
+
+            # ... then invoke it with the logging settings
+            logging_config_func(self.LOGGING)
+
+
+class UserSettingsHolder(BaseSettings):
     """
     Holder for user configured settings.
     """
@@ -144,8 +163,49 @@ class UserSettingsHolder(object):
     def __getattr__(self, name):
         return getattr(self.default_settings, name)
 
-    def get_all_members(self):
-        return dir(self) + dir(self.default_settings)
+    def __dir__(self):
+        return self.__dict__.keys() + dir(self.default_settings)
+
+    # For Python < 2.6:
+    __members__ = property(lambda self: self.__dir__())
 
 settings = LazySettings()
 
+
+
+def compat_patch_logging_config(logging_config):
+    """
+    Backwards-compatibility shim for #16288 fix. Takes initial value of
+    ``LOGGING`` setting and patches it in-place (issuing deprecation warning)
+    if "mail_admins" logging handler is configured but has no filters.
+
+    """
+    #  Shim only if LOGGING["handlers"]["mail_admins"] exists,
+    #  but has no "filters" key
+    if "filters" not in logging_config.get(
+        "handlers", {}).get(
+        "mail_admins", {"filters": []}):
+
+        warnings.warn(
+            "You have no filters defined on the 'mail_admins' logging "
+            "handler: adding implicit debug-false-only filter. "
+            "See http://docs.djangoproject.com/en/dev/releases/1.4/"
+            "#request-exceptions-are-now-always-logged",
+            PendingDeprecationWarning)
+
+        filter_name = "require_debug_false"
+
+        filters = logging_config.setdefault("filters", {})
+        while filter_name in filters:
+            filter_name = filter_name + "_"
+
+        def _callback(record):
+            from django.conf import settings
+            return not settings.DEBUG
+
+        filters[filter_name] = {
+            "()": "django.utils.log.CallbackFilter",
+            "callback": _callback
+            }
+
+        logging_config["handlers"]["mail_admins"]["filters"] = [filter_name]

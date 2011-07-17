@@ -1,16 +1,6 @@
-"""
-Regression tests for Model inheritance behaviour.
-"""
-
 import datetime
 
 from django.db import models
-
-# Python 2.3 doesn't have sorted()
-try:
-    sorted
-except NameError:
-    from django.utils.itercompat import sorted
 
 class Place(models.Model):
     name = models.CharField(max_length=50)
@@ -43,120 +33,133 @@ class ParkingLot(Place):
     def __unicode__(self):
         return u"%s the parking lot" % self.name
 
+class ParkingLot2(Place):
+    # In lieu of any other connector, an existing OneToOneField will be
+    # promoted to the primary key.
+    parent = models.OneToOneField(Place)
+
+class ParkingLot3(Place):
+    # The parent_link connector need not be the pk on the model.
+    primary_key = models.AutoField(primary_key=True)
+    parent = models.OneToOneField(Place, parent_link=True)
+
+class Supplier(models.Model):
+    restaurant = models.ForeignKey(Restaurant)
+
+class Wholesaler(Supplier):
+    retailer = models.ForeignKey(Supplier,related_name='wholesale_supplier')
+
 class Parent(models.Model):
     created = models.DateTimeField(default=datetime.datetime.now)
 
 class Child(Parent):
     name = models.CharField(max_length=10)
 
-__test__ = {'API_TESTS':"""
-# Regression for #7350, #7202
-# Check that when you create a Parent object with a specific reference to an
-# existent child instance, saving the Parent doesn't duplicate the child. This
-# behaviour is only activated during a raw save - it is mostly relevant to
-# deserialization, but any sort of CORBA style 'narrow()' API would require a
-# similar approach.
+class SelfRefParent(models.Model):
+    parent_data = models.IntegerField()
+    self_data = models.ForeignKey('self', null=True)
 
-# Create a child-parent-grandparent chain
->>> place1 = Place(name="Guido's House of Pasta", address='944 W. Fullerton')
->>> place1.save_base(raw=True)
->>> restaurant = Restaurant(place_ptr=place1, serves_hot_dogs=True, serves_pizza=False)
->>> restaurant.save_base(raw=True)
->>> italian_restaurant = ItalianRestaurant(restaurant_ptr=restaurant, serves_gnocchi=True)
->>> italian_restaurant.save_base(raw=True)
+class SelfRefChild(SelfRefParent):
+    child_data = models.IntegerField()
 
-# Create a child-parent chain with an explicit parent link
->>> place2 = Place(name='Main St', address='111 Main St')
->>> place2.save_base(raw=True)
->>> park = ParkingLot(parent=place2, capacity=100)
->>> park.save_base(raw=True)
+class Article(models.Model):
+    headline = models.CharField(max_length=100)
+    pub_date = models.DateTimeField()
+    class Meta:
+        ordering = ('-pub_date', 'headline')
 
-# Check that no extra parent objects have been created.
->>> Place.objects.all()
-[<Place: Guido's House of Pasta the place>, <Place: Main St the place>]
+    def __unicode__(self):
+        return self.headline
 
->>> dicts = Restaurant.objects.values('name','serves_hot_dogs')
->>> [sorted(d.items()) for d in dicts]
-[[('name', u"Guido's House of Pasta"), ('serves_hot_dogs', True)]]
+class ArticleWithAuthor(Article):
+    author = models.CharField(max_length=100)
 
->>> dicts = ItalianRestaurant.objects.values('name','serves_hot_dogs','serves_gnocchi')
->>> [sorted(d.items()) for d in dicts]
-[[('name', u"Guido's House of Pasta"), ('serves_gnocchi', True), ('serves_hot_dogs', True)]]
+class M2MBase(models.Model):
+    articles = models.ManyToManyField(Article)
 
->>> dicts = ParkingLot.objects.values('name','capacity')
->>> [sorted(d.items()) for d in dicts]
-[[('capacity', 100), ('name', u'Main St')]]
+class M2MChild(M2MBase):
+    name = models.CharField(max_length=50)
 
-# You can also update objects when using a raw save.
->>> place1.name = "Guido's All New House of Pasta"
->>> place1.save_base(raw=True)
+class Evaluation(Article):
+    quality = models.IntegerField()
 
->>> restaurant.serves_hot_dogs = False
->>> restaurant.save_base(raw=True)
+    class Meta:
+        abstract = True
 
->>> italian_restaurant.serves_gnocchi = False
->>> italian_restaurant.save_base(raw=True)
+class QualityControl(Evaluation):
+    assignee = models.CharField(max_length=50)
 
->>> place2.name='Derelict lot'
->>> place2.save_base(raw=True)
+class BaseM(models.Model):
+    base_name = models.CharField(max_length=100)
 
->>> park.capacity = 50
->>> park.save_base(raw=True)
+    def __unicode__(self):
+        return self.base_name
 
-# No extra parent objects after an update, either.
->>> Place.objects.all()
-[<Place: Derelict lot the place>, <Place: Guido's All New House of Pasta the place>]
+class DerivedM(BaseM):
+    customPK = models.IntegerField(primary_key=True)
+    derived_name = models.CharField(max_length=100)
 
->>> dicts = Restaurant.objects.values('name','serves_hot_dogs')
->>> [sorted(d.items()) for d in dicts]
-[[('name', u"Guido's All New House of Pasta"), ('serves_hot_dogs', False)]]
+    def __unicode__(self):
+        return "PK = %d, base_name = %s, derived_name = %s" \
+                % (self.customPK, self.base_name, self.derived_name)
 
->>> dicts = ItalianRestaurant.objects.values('name','serves_hot_dogs','serves_gnocchi')
->>> [sorted(d.items()) for d in dicts]
-[[('name', u"Guido's All New House of Pasta"), ('serves_gnocchi', False), ('serves_hot_dogs', False)]]
+class AuditBase(models.Model):
+    planned_date = models.DateField()
 
->>> dicts = ParkingLot.objects.values('name','capacity')
->>> [sorted(d.items()) for d in dicts]
-[[('capacity', 50), ('name', u'Derelict lot')]]
+    class Meta:
+        abstract = True
+        verbose_name_plural = u'Audits'
 
-# If you try to raw_save a parent attribute onto a child object,
-# the attribute will be ignored.
+class CertificationAudit(AuditBase):
+    class Meta(AuditBase.Meta):
+        abstract = True
 
->>> italian_restaurant.name = "Lorenzo's Pasta Hut"
->>> italian_restaurant.save_base(raw=True)
+class InternalCertificationAudit(CertificationAudit):
+    auditing_dept = models.CharField(max_length=20)
 
-# Note that the name has not changed
-# - name is an attribute of Place, not ItalianRestaurant
->>> dicts = ItalianRestaurant.objects.values('name','serves_hot_dogs','serves_gnocchi')
->>> [sorted(d.items()) for d in dicts]
-[[('name', u"Guido's All New House of Pasta"), ('serves_gnocchi', False), ('serves_hot_dogs', False)]]
+# Check that abstract classes don't get m2m tables autocreated.
+class Person(models.Model):
+    name = models.CharField(max_length=100)
 
-# Regressions tests for #7105: dates() queries should be able to use fields
-# from the parent model as easily as the child.
->>> obj = Child.objects.create(name='child', created=datetime.datetime(2008, 6, 26, 17, 0, 0))
->>> Child.objects.dates('created', 'month')
-[datetime.datetime(2008, 6, 1, 0, 0)]
+    class Meta:
+        ordering = ('name',)
 
-# Regression test for #7276: calling delete() on a model with multi-table
-# inheritance should delete the associated rows from any ancestor tables, as
-# well as any descendent objects.
+    def __unicode__(self):
+        return self.name
 
->>> ident = ItalianRestaurant.objects.all()[0].id
->>> Place.objects.get(pk=ident)
-<Place: Guido's All New House of Pasta the place>
->>> xx = Restaurant.objects.create(name='a', address='xx', serves_hot_dogs=True, serves_pizza=False)
+class AbstractEvent(models.Model):
+    name = models.CharField(max_length=100)
+    attendees = models.ManyToManyField(Person, related_name="%(class)s_set")
 
-# This should delete both Restuarants, plus the related places, plus the ItalianRestaurant.
->>> Restaurant.objects.all().delete()
+    class Meta:
+        abstract = True
+        ordering = ('name',)
 
->>> Place.objects.get(pk=ident)
-Traceback (most recent call last):
-...
-DoesNotExist: Place matching query does not exist.
+    def __unicode__(self):
+        return self.name
 
->>> ItalianRestaurant.objects.get(pk=ident)
-Traceback (most recent call last):
-...
-DoesNotExist: ItalianRestaurant matching query does not exist.
+class BirthdayParty(AbstractEvent):
+    pass
 
-"""}
+class BachelorParty(AbstractEvent):
+    pass
+
+class MessyBachelorParty(BachelorParty):
+    pass
+
+# Check concrete -> abstract -> concrete inheritance
+class SearchableLocation(models.Model):
+    keywords = models.CharField(max_length=256)
+
+class Station(SearchableLocation):
+    name = models.CharField(max_length=128)
+
+    class Meta:
+        abstract = True
+
+class BusStation(Station):
+    bus_routes = models.CommaSeparatedIntegerField(max_length=128)
+    inbound = models.BooleanField()
+
+class TrainStation(Station):
+    zone = models.IntegerField()

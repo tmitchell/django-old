@@ -1,3 +1,6 @@
+import copy
+from types import GeneratorType
+
 class MergeDict(object):
     """
     A simple class for creating new "virtual" dictionaries that actually look
@@ -32,11 +35,32 @@ class MergeDict(object):
                 return dict_.getlist(key)
         return []
 
-    def items(self):
-        item_list = []
+    def iteritems(self):
+        seen = set()
         for dict_ in self.dicts:
-            item_list.extend(dict_.items())
-        return item_list
+            for item in dict_.iteritems():
+                k, v = item
+                if k in seen:
+                    continue
+                seen.add(k)
+                yield item
+
+    def iterkeys(self):
+        for k, v in self.iteritems():
+            yield k
+
+    def itervalues(self):
+        for k, v in self.iteritems():
+            yield v
+
+    def items(self):
+        return list(self.iteritems())
+
+    def keys(self):
+        return list(self.iterkeys())
+
+    def values(self):
+        return list(self.itervalues())
 
     def has_key(self, key):
         for dict_ in self.dicts:
@@ -45,44 +69,76 @@ class MergeDict(object):
         return False
 
     __contains__ = has_key
+    __iter__ = iterkeys
 
     def copy(self):
         """Returns a copy of this object."""
         return self.__copy__()
 
+    def __str__(self):
+        '''
+        Returns something like
+
+            "{'key1': 'val1', 'key2': 'val2', 'key3': 'val3'}"
+
+        instead of the generic "<object meta-data>" inherited from object.
+        '''
+        return str(dict(self.items()))
+
+    def __repr__(self):
+        '''
+        Returns something like
+
+            MergeDict({'key1': 'val1', 'key2': 'val2'}, {'key3': 'val3'})
+
+        instead of generic "<object meta-data>" inherited from object.
+        '''
+        dictreprs = ', '.join(repr(d) for d in self.dicts)
+        return '%s(%s)' % (self.__class__.__name__, dictreprs)
+
 class SortedDict(dict):
     """
     A dictionary that keeps its keys in the order in which they're inserted.
     """
+    def __new__(cls, *args, **kwargs):
+        instance = super(SortedDict, cls).__new__(cls, *args, **kwargs)
+        instance.keyOrder = []
+        return instance
+
     def __init__(self, data=None):
         if data is None:
             data = {}
+        elif isinstance(data, GeneratorType):
+            # Unfortunately we need to be able to read a generator twice.  Once
+            # to get the data into self with our super().__init__ call and a
+            # second time to setup keyOrder correctly
+            data = list(data)
         super(SortedDict, self).__init__(data)
         if isinstance(data, dict):
             self.keyOrder = data.keys()
         else:
             self.keyOrder = []
+            seen = set()
             for key, value in data:
-                if key not in self.keyOrder:
+                if key not in seen:
                     self.keyOrder.append(key)
+                    seen.add(key)
 
     def __deepcopy__(self, memo):
-        from copy import deepcopy
-        return self.__class__([(key, deepcopy(value, memo))
+        return self.__class__([(key, copy.deepcopy(value, memo))
                                for key, value in self.iteritems()])
 
     def __setitem__(self, key, value):
-        super(SortedDict, self).__setitem__(key, value)
-        if key not in self.keyOrder:
+        if key not in self:
             self.keyOrder.append(key)
+        super(SortedDict, self).__setitem__(key, value)
 
     def __delitem__(self, key):
         super(SortedDict, self).__delitem__(key)
         self.keyOrder.remove(key)
 
     def __iter__(self):
-        for k in self.keyOrder:
-            yield k
+        return iter(self.keyOrder)
 
     def pop(self, k, *args):
         result = super(SortedDict, self).pop(k, *args)
@@ -103,7 +159,7 @@ class SortedDict(dict):
 
     def iteritems(self):
         for key in self.keyOrder:
-            yield key, super(SortedDict, self).__getitem__(key)
+            yield key, self[key]
 
     def keys(self):
         return self.keyOrder[:]
@@ -112,18 +168,18 @@ class SortedDict(dict):
         return iter(self.keyOrder)
 
     def values(self):
-        return [super(SortedDict, self).__getitem__(k) for k in self.keyOrder]
+        return map(self.__getitem__, self.keyOrder)
 
     def itervalues(self):
         for key in self.keyOrder:
-            yield super(SortedDict, self).__getitem__(key)
+            yield self[key]
 
     def update(self, dict_):
-        for k, v in dict_.items():
-            self.__setitem__(k, v)
+        for k, v in dict_.iteritems():
+            self[k] = v
 
     def setdefault(self, key, default):
-        if key not in self.keyOrder:
+        if key not in self:
             self.keyOrder.append(key)
         return super(SortedDict, self).setdefault(key, default)
 
@@ -172,6 +228,10 @@ class MultiValueDict(dict):
     'Simon'
     >>> d.getlist('name')
     ['Adrian', 'Simon']
+    >>> d.getlist('doesnotexist')
+    []
+    >>> d.getlist('doesnotexist', ['Adrian', 'Simon'])
+    ['Adrian', 'Simon']
     >>> d.get('lastname', 'nonexistent')
     'nonexistent'
     >>> d.setlist('lastname', ['Holovaty', 'Willison'])
@@ -195,7 +255,7 @@ class MultiValueDict(dict):
         try:
             list_ = super(MultiValueDict, self).__getitem__(key)
         except KeyError:
-            raise MultiValueDictKeyError, "Key %r not found in %r" % (key, self)
+            raise MultiValueDictKeyError("Key %r not found in %r" % (key, self))
         try:
             return list_[-1]
         except IndexError:
@@ -205,10 +265,12 @@ class MultiValueDict(dict):
         super(MultiValueDict, self).__setitem__(key, [value])
 
     def __copy__(self):
-        return self.__class__(super(MultiValueDict, self).items())
+        return self.__class__([
+            (k, v[:])
+            for k, v in self.lists()
+        ])
 
     def __deepcopy__(self, memo=None):
-        import copy
         if memo is None:
             memo = {}
         result = self.__class__()
@@ -217,6 +279,17 @@ class MultiValueDict(dict):
             dict.__setitem__(result, copy.deepcopy(key, memo),
                              copy.deepcopy(value, memo))
         return result
+
+    def __getstate__(self):
+        obj_dict = self.__dict__.copy()
+        obj_dict['_data'] = dict([(k, self.getlist(k)) for k in self])
+        return obj_dict
+
+    def __setstate__(self, obj_dict):
+        data = obj_dict.pop('_data', {})
+        for k, v in data.items():
+            self.setlist(k, v)
+        self.__dict__.update(obj_dict)
 
     def get(self, key, default=None):
         """
@@ -231,14 +304,16 @@ class MultiValueDict(dict):
             return default
         return val
 
-    def getlist(self, key):
+    def getlist(self, key, default=None):
         """
         Returns the list of values for the passed key. If key doesn't exist,
-        then an empty list is returned.
+        then a default value is returned.
         """
         try:
             return super(MultiValueDict, self).__getitem__(key)
         except KeyError:
+            if default is not None:
+                return default
             return []
 
     def setlist(self, key, list_):
@@ -266,17 +341,34 @@ class MultiValueDict(dict):
         """
         return [(key, self[key]) for key in self.keys()]
 
+    def iteritems(self):
+        """
+        Yields (key, value) pairs, where value is the last item in the list
+        associated with the key.
+        """
+        for key in self.keys():
+            yield (key, self[key])
+
     def lists(self):
         """Returns a list of (key, list) pairs."""
         return super(MultiValueDict, self).items()
+
+    def iterlists(self):
+        """Yields (key, list) pairs."""
+        return super(MultiValueDict, self).iteritems()
 
     def values(self):
         """Returns a list of the last value on every key list."""
         return [self[key] for key in self.keys()]
 
+    def itervalues(self):
+        """Yield the last value on every key list."""
+        for key in self.iterkeys():
+            yield self[key]
+
     def copy(self):
-        """Returns a copy of this object."""
-        return self.__deepcopy__()
+        """Returns a shallow copy of this object."""
+        return copy.copy(self)
 
     def update(self, *args, **kwargs):
         """
@@ -284,7 +376,7 @@ class MultiValueDict(dict):
         Also accepts keyword args.
         """
         if len(args) > 1:
-            raise TypeError, "update expected at most 1 arguments, got %d" % len(args)
+            raise TypeError("update expected at most 1 arguments, got %d" % len(args))
         if args:
             other_dict = args[0]
             if isinstance(other_dict, MultiValueDict):
@@ -295,9 +387,15 @@ class MultiValueDict(dict):
                     for key, value in other_dict.items():
                         self.setlistdefault(key, []).append(value)
                 except TypeError:
-                    raise ValueError, "MultiValueDict.update() takes either a MultiValueDict or dictionary"
+                    raise ValueError("MultiValueDict.update() takes either a MultiValueDict or dictionary")
         for key, value in kwargs.iteritems():
             self.setlistdefault(key, []).append(value)
+
+    def dict(self):
+        """
+        Returns current object as a dict with singular values.
+        """
+        return dict((key, self[key]) for key in self)
 
 class DotExpandedDict(dict):
     """
@@ -359,7 +457,7 @@ class ImmutableList(tuple):
         if isinstance(self.warning, Exception):
             raise self.warning
         else:
-            raise AttributeError, self.warning
+            raise AttributeError(self.warning)
 
     # All list mutation functions complain.
     __delitem__  = complain
@@ -405,4 +503,3 @@ class DictWrapper(dict):
         if use_func:
             return self.func(value)
         return value
-

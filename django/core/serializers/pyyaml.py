@@ -4,22 +4,27 @@ YAML serializer.
 Requires PyYaml (http://pyyaml.org/), but that's checked for in __init__.
 """
 
+from StringIO import StringIO
+import decimal
+import yaml
+
 from django.db import models
 from django.core.serializers.python import Serializer as PythonSerializer
 from django.core.serializers.python import Deserializer as PythonDeserializer
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
-import yaml
+
+class DjangoSafeDumper(yaml.SafeDumper):
+    def represent_decimal(self, data):
+        return self.represent_scalar('tag:yaml.org,2002:str', str(data))
+
+DjangoSafeDumper.add_representer(decimal.Decimal, DjangoSafeDumper.represent_decimal)
 
 class Serializer(PythonSerializer):
     """
     Convert a queryset to YAML.
     """
-    
+
     internal_use_only = False
-    
+
     def handle_field(self, obj, field):
         # A nasty special case: base YAML doesn't support serialization of time
         # types (as opposed to dates or datetimes, which it does support). Since
@@ -31,11 +36,9 @@ class Serializer(PythonSerializer):
             self._current[field.name] = str(getattr(obj, field.name))
         else:
             super(Serializer, self).handle_field(obj, field)
-    
+
     def end_serialization(self):
-        self.options.pop('stream', None)
-        self.options.pop('fields', None)
-        yaml.safe_dump(self.objects, self.stream, **self.options)
+        yaml.dump(self.objects, self.stream, Dumper=DjangoSafeDumper, **self.options)
 
     def getvalue(self):
         return self.stream.getvalue()
@@ -48,6 +51,6 @@ def Deserializer(stream_or_string, **options):
         stream = StringIO(stream_or_string)
     else:
         stream = stream_or_string
-    for obj in PythonDeserializer(yaml.load(stream)):
+    for obj in PythonDeserializer(yaml.load(stream), **options):
         yield obj
 

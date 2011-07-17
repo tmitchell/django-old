@@ -2,12 +2,14 @@
 Module for abstract serializer/unserializer base classes.
 """
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
+from StringIO import StringIO
+
 from django.db import models
-from django.utils.encoding import smart_str, smart_unicode
+from django.utils.encoding import smart_unicode
+
+class SerializerDoesNotExist(KeyError):
+    """The requested serializer was not found."""
+    pass
 
 class SerializationError(Exception):
     """Something bad happened during serialization."""
@@ -32,8 +34,9 @@ class Serializer(object):
         """
         self.options = options
 
-        self.stream = options.get("stream", StringIO())
-        self.selected_fields = options.get("fields")
+        self.stream = options.pop("stream", StringIO())
+        self.selected_fields = options.pop("fields", None)
+        self.use_natural_keys = options.pop("use_natural_keys", False)
 
         self.start_serialization()
         for obj in queryset:
@@ -58,11 +61,7 @@ class Serializer(object):
         """
         Convert a field's value to a string.
         """
-        if isinstance(field, models.DateTimeField):
-            value = getattr(obj, field.name).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            value = field.flatten_data(follow=None, obj=obj).get(field.name, "")
-        return smart_unicode(value)
+        return smart_unicode(field.value_to_string(obj))
 
     def start_serialization(self):
         """
@@ -157,15 +156,16 @@ class DeserializedObject(object):
         self.m2m_data = m2m_data
 
     def __repr__(self):
-        return "<DeserializedObject: %s>" % smart_str(self.object)
+        return "<DeserializedObject: %s.%s(pk=%s)>" % (
+            self.object._meta.app_label, self.object._meta.object_name, self.object.pk)
 
-    def save(self, save_m2m=True):
+    def save(self, save_m2m=True, using=None):
         # Call save on the Model baseclass directly. This bypasses any
         # model-defined save. The save is also forced to be raw.
         # This ensures that the data that is deserialized is literally
         # what came from the file, not post-processed by pre_save/save
         # methods.
-        models.Model.save_base(self.object, raw=True)
+        models.Model.save_base(self.object, using=using, raw=True)
         if self.m2m_data and save_m2m:
             for accessor_name, object_list in self.m2m_data.items():
                 setattr(self.object, accessor_name, object_list)

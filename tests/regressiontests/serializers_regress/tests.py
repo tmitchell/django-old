@@ -6,22 +6,22 @@ test case that is capable of testing the capabilities of
 the serializers. This includes all valid data values, plus
 forward, backwards and self references.
 """
+from __future__ import with_statement
 
+import datetime
+import decimal
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 
-import unittest, datetime
-from cStringIO import StringIO
-
-from django.utils.functional import curry
 from django.core import serializers
-from django.db import transaction
-from django.core import management
-from django.conf import settings
+from django.core.serializers import SerializerDoesNotExist
+from django.db import connection
+from django.test import TestCase
+from django.utils.functional import curry
 
 from models import *
-try:
-    import decimal
-except ImportError:
-    from django.utils import _decimal as decimal
 
 # A set of functions that can be used to recreate
 # test data objects of various kinds.
@@ -54,6 +54,20 @@ def m2m_create(pk, klass, data):
     instance.data = data
     return [instance]
 
+def im2m_create(pk, klass, data):
+    instance = klass(id=pk)
+    models.Model.save_base(instance, raw=True)
+    return [instance]
+
+def im_create(pk, klass, data):
+    instance = klass(id=pk)
+    instance.right_id = data['right']
+    instance.left_id = data['left']
+    if 'extra' in data:
+        instance.extra = data['extra']
+    models.Model.save_base(instance, raw=True)
+    return [instance]
+
 def o2o_create(pk, klass, data):
     instance = klass()
     instance.data_id = data
@@ -72,24 +86,26 @@ def inherited_create(pk, klass, data):
     #  1) we're testing inheritance, not field behaviour, so none
     #     of the field values need to be protected.
     #  2) saving the child class and having the parent created
-    #     automatically is easier than manually creating both. 
+    #     automatically is easier than manually creating both.
     models.Model.save(instance)
     created = [instance]
     for klass,field in instance._meta.parents.items():
         created.append(klass.objects.get(id=pk))
     return created
-    
+
 # A set of functions that can be used to compare
 # test data objects of various kinds
 def data_compare(testcase, pk, klass, data):
     instance = klass.objects.get(id=pk)
     testcase.assertEqual(data, instance.data,
-                         "Objects with PK=%d not equal; expected '%s' (%s), got '%s' (%s)" % (pk,data, type(data), instance.data, type(instance.data)))
+         "Objects with PK=%d not equal; expected '%s' (%s), got '%s' (%s)" % (
+            pk, data, type(data), instance.data, type(instance.data))
+    )
 
 def generic_compare(testcase, pk, klass, data):
     instance = klass.objects.get(id=pk)
     testcase.assertEqual(data[0], instance.data)
-    testcase.assertEqual(data[1:], [t.data for t in instance.tags.all()])
+    testcase.assertEqual(data[1:], [t.data for t in instance.tags.order_by('id')])
 
 def fk_compare(testcase, pk, klass, data):
     instance = klass.objects.get(id=pk)
@@ -97,7 +113,20 @@ def fk_compare(testcase, pk, klass, data):
 
 def m2m_compare(testcase, pk, klass, data):
     instance = klass.objects.get(id=pk)
-    testcase.assertEqual(data, [obj.id for obj in instance.data.all()])
+    testcase.assertEqual(data, [obj.id for obj in instance.data.order_by('id')])
+
+def im2m_compare(testcase, pk, klass, data):
+    instance = klass.objects.get(id=pk)
+    #actually nothing else to check, the instance just should exist
+
+def im_compare(testcase, pk, klass, data):
+    instance = klass.objects.get(id=pk)
+    testcase.assertEqual(data['left'], instance.left_id)
+    testcase.assertEqual(data['right'], instance.right_id)
+    if 'extra' in data:
+        testcase.assertEqual(data['extra'], instance.extra)
+    else:
+        testcase.assertEqual("doesn't matter", instance.extra)
 
 def o2o_compare(testcase, pk, klass, data):
     instance = klass.objects.get(data=data)
@@ -111,7 +140,7 @@ def inherited_compare(testcase, pk, klass, data):
     instance = klass.objects.get(id=pk)
     for key,value in data.items():
         testcase.assertEqual(value, getattr(instance,key))
-    
+
 # Define some data types. Each data type is
 # actually a pair of functions; one to create
 # and one to compare objects of that type
@@ -119,6 +148,8 @@ data_obj = (data_create, data_compare)
 generic_obj = (generic_create, generic_compare)
 fk_obj = (fk_create, fk_compare)
 m2m_obj = (m2m_create, m2m_compare)
+im2m_obj = (im2m_create, im2m_compare)
+im_obj = (im_create, im_compare)
 o2o_obj = (o2o_create, o2o_compare)
 pk_obj = (pk_create, pk_compare)
 inherited_obj = (inherited_create, inherited_compare)
@@ -144,7 +175,7 @@ test_data = [
     (data_obj, 41, EmailData, None),
     (data_obj, 42, EmailData, ""),
     (data_obj, 50, FileData, 'file:///foo/bar/whiz.txt'),
-    (data_obj, 51, FileData, None),
+#     (data_obj, 51, FileData, None),
     (data_obj, 52, FileData, ""),
     (data_obj, 60, FilePathData, "/foo/bar/whiz.txt"),
     (data_obj, 61, FilePathData, None),
@@ -164,6 +195,8 @@ test_data = [
     #(XX, ImageData
     (data_obj, 90, IPAddressData, "127.0.0.1"),
     (data_obj, 91, IPAddressData, None),
+    (data_obj, 95, GenericIPAddressData, "fe80:1424:2223:6cff:fe8a:2e8a:2151:abcd"),
+    (data_obj, 96, GenericIPAddressData, None),
     (data_obj, 100, NullBooleanData, True),
     (data_obj, 101, NullBooleanData, False),
     (data_obj, 102, NullBooleanData, None),
@@ -191,9 +224,6 @@ The end."""),
     (data_obj, 180, USStateData, "MA"),
     (data_obj, 181, USStateData, None),
     (data_obj, 182, USStateData, ""),
-    (data_obj, 190, XMLData, "<foo></foo>"),
-    (data_obj, 191, XMLData, None),
-    (data_obj, 192, XMLData, ""),
 
     (generic_obj, 200, GenericData, ['Generic Object 1', 'tag1', 'tag2']),
     (generic_obj, 201, GenericData, ['Generic Object 2', 'tag2', 'tag3']),
@@ -232,6 +262,20 @@ The end."""),
 
     (fk_obj, 460, FKDataToO2O, 300),
 
+    (im2m_obj, 470, M2MIntermediateData, None),
+
+    #testing post- and prereferences and extra fields
+    (im_obj, 480, Intermediate, {'right': 300, 'left': 470}),
+    (im_obj, 481, Intermediate, {'right': 300, 'left': 490}),
+    (im_obj, 482, Intermediate, {'right': 500, 'left': 470}),
+    (im_obj, 483, Intermediate, {'right': 500, 'left': 490}),
+    (im_obj, 484, Intermediate, {'right': 300, 'left': 470, 'extra': "extra"}),
+    (im_obj, 485, Intermediate, {'right': 300, 'left': 490, 'extra': "extra"}),
+    (im_obj, 486, Intermediate, {'right': 500, 'left': 470, 'extra': "extra"}),
+    (im_obj, 487, Intermediate, {'right': 500, 'left': 490, 'extra': "extra"}),
+
+    (im2m_obj, 490, M2MIntermediateData, []),
+
     (data_obj, 500, Anchor, "Anchor 3"),
     (data_obj, 501, Anchor, "Anchor 4"),
     (data_obj, 502, UniqueAnchor, "UAnchor 2"),
@@ -242,7 +286,7 @@ The end."""),
 #     (pk_obj, 620, DatePKData, datetime.date(2006,6,16)),
 #     (pk_obj, 630, DateTimePKData, datetime.datetime(2006,6,16,10,42,37)),
     (pk_obj, 640, EmailPKData, "hovercraft@example.com"),
-    (pk_obj, 650, FilePKData, 'file:///foo/bar/whiz.txt'),
+#     (pk_obj, 650, FilePKData, 'file:///foo/bar/whiz.txt'),
     (pk_obj, 660, FilePathPKData, "/foo/bar/whiz.txt"),
     (pk_obj, 670, DecimalPKData, decimal.Decimal('12.345')),
     (pk_obj, 671, DecimalPKData, decimal.Decimal('-12.345')),
@@ -255,6 +299,7 @@ The end."""),
     (pk_obj, 682, IntegerPKData, 0),
 #     (XX, ImagePKData
     (pk_obj, 690, IPAddressPKData, "127.0.0.1"),
+    (pk_obj, 695, GenericIPAddressPKData, "fe80:1424:2223:6cff:fe8a:2e8a:2151:abcd"),
     # (pk_obj, 700, NullBooleanPKData, True),
     # (pk_obj, 701, NullBooleanPKData, False),
     (pk_obj, 710, PhonePKData, "212-634-5789"),
@@ -274,59 +319,83 @@ The end."""),
 
     (data_obj, 800, AutoNowDateTimeData, datetime.datetime(2006,6,16,10,42,37)),
     (data_obj, 810, ModifyingSaveData, 42),
-    
+
     (inherited_obj, 900, InheritAbstractModel, {'child_data':37,'parent_data':42}),
     (inherited_obj, 910, ExplicitInheritBaseModel, {'child_data':37,'parent_data':42}),
     (inherited_obj, 920, InheritBaseModel, {'child_data':37,'parent_data':42}),
+
+    (data_obj, 1000, BigIntegerData, 9223372036854775807),
+    (data_obj, 1001, BigIntegerData, -9223372036854775808),
+    (data_obj, 1002, BigIntegerData, 0),
+    (data_obj, 1003, BigIntegerData, None),
+    (data_obj, 1004, LengthModel, 0),
+    (data_obj, 1005, LengthModel, 1),
 ]
 
 # Because Oracle treats the empty string as NULL, Oracle is expected to fail
 # when field.empty_strings_allowed is True and the value is None; skip these
 # tests.
-if settings.DATABASE_ENGINE == 'oracle':
+if connection.features.interprets_empty_strings_as_nulls:
     test_data = [data for data in test_data
                  if not (data[0] == data_obj and
                          data[2]._meta.get_field('data').empty_strings_allowed and
                          data[3] is None)]
 
+# Regression test for #8651 -- a FK to an object iwth PK of 0
+# This won't work on MySQL since it won't let you create an object
+# with a primary key of 0,
+if connection.features.allows_primary_key_0:
+    test_data.extend([
+        (data_obj, 0, Anchor, "Anchor 0"),
+        (fk_obj, 465, FKData, 0),
+    ])
+
 # Dynamically create serializer tests to ensure that all
 # registered serializers are automatically tested.
-class SerializerTests(unittest.TestCase):
-    pass
+class SerializerTests(TestCase):
+    def test_get_unknown_serializer(self):
+        """
+        #15889: get_serializer('nonsense') raises a SerializerDoesNotExist
+        """
+        with self.assertRaises(SerializerDoesNotExist):
+            serializers.get_serializer("nonsense")
+
+        with self.assertRaises(KeyError):
+            serializers.get_serializer("nonsense")
+
+        # SerializerDoesNotExist is instantiated with the nonexistent format
+        with self.assertRaises(SerializerDoesNotExist) as cm:
+            serializers.get_serializer("nonsense")
+        self.assertEqual(cm.exception.args, ("nonsense",))
+
+    def test_unregister_unkown_serializer(self):
+        with self.assertRaises(SerializerDoesNotExist):
+            serializers.unregister_serializer("nonsense")
+
+    def test_get_unkown_deserializer(self):
+        with self.assertRaises(SerializerDoesNotExist):
+            serializers.get_deserializer("nonsense")
 
 def serializerTest(format, self):
-    # Clear the database first
-    management.call_command('flush', verbosity=0, interactive=False)
 
     # Create all the objects defined in the test data
     objects = []
     instance_count = {}
-    transaction.enter_transaction_management()
-    transaction.managed(True)
     for (func, pk, klass, datum) in test_data:
         objects.extend(func[0](pk, klass, datum))
-        instance_count[klass] = 0
-    transaction.commit()
-    transaction.leave_transaction_management()
 
     # Get a count of the number of objects created for each class
     for klass in instance_count:
         instance_count[klass] = klass.objects.count()
-        
+
     # Add the generic tagged objects to the object list
     objects.extend(Tag.objects.all())
 
     # Serialize the test database
     serialized_data = serializers.serialize(format, objects, indent=2)
 
-    # Flush the database and recreate from the serialized data
-    management.call_command('flush', verbosity=0, interactive=False)
-    transaction.enter_transaction_management()
-    transaction.managed(True)
     for obj in serializers.deserialize(format, serialized_data):
         obj.save()
-    transaction.commit()
-    transaction.leave_transaction_management()
 
     # Assert that the deserialized data is the same
     # as the original source
@@ -336,13 +405,10 @@ def serializerTest(format, self):
     # Assert that the number of objects deserialized is the
     # same as the number that was serialized.
     for klass, count in instance_count.items():
-        self.assertEquals(count, klass.objects.count())
+        self.assertEqual(count, klass.objects.count())
 
 def fieldsTest(format, self):
-    # Clear the database first
-    management.call_command('flush', verbosity=0, interactive=False)
-
-    obj = ComplexModel(field1='first',field2='second',field3='third')
+    obj = ComplexModel(field1='first', field2='second', field3='third')
     obj.save_base(raw=True)
 
     # Serialize then deserialize the test database
@@ -355,9 +421,6 @@ def fieldsTest(format, self):
     self.assertEqual(result.object.field3, 'third')
 
 def streamTest(format, self):
-    # Clear the database first
-    management.call_command('flush', verbosity=0, interactive=False)
-
     obj = ComplexModel(field1='first',field2='second',field3='third')
     obj.save_base(raw=True)
 
@@ -373,7 +436,7 @@ def streamTest(format, self):
     stream.close()
 
 for format in serializers.get_serializer_formats():
-    setattr(SerializerTests, 'test_'+format+'_serializer', curry(serializerTest, format))
-    setattr(SerializerTests, 'test_'+format+'_serializer_fields', curry(fieldsTest, format))
+    setattr(SerializerTests, 'test_' + format + '_serializer', curry(serializerTest, format))
+    setattr(SerializerTests, 'test_' + format + '_serializer_fields', curry(fieldsTest, format))
     if format != 'python':
-        setattr(SerializerTests, 'test_'+format+'_serializer_stream', curry(streamTest, format))
+        setattr(SerializerTests, 'test_' + format + '_serializer_stream', curry(streamTest, format))

@@ -1,25 +1,25 @@
-from unittest import TestCase
-from django.db import DatabaseError
+from django.utils import unittest
+
 from regressiontests.max_lengths.models import PersonWithDefaultMaxLengths, PersonWithCustomMaxLengths
 
-class MaxLengthArgumentsTests(TestCase):
-        
+class MaxLengthArgumentsTests(unittest.TestCase):
+
     def verify_max_length(self, model,field,length):
-        self.assertEquals(model._meta.get_field(field).max_length,length)
-        
+        self.assertEqual(model._meta.get_field(field).max_length,length)
+
     def test_default_max_lengths(self):
         self.verify_max_length(PersonWithDefaultMaxLengths, 'email', 75)
         self.verify_max_length(PersonWithDefaultMaxLengths, 'vcard', 100)
         self.verify_max_length(PersonWithDefaultMaxLengths, 'homepage', 200)
         self.verify_max_length(PersonWithDefaultMaxLengths, 'avatar', 100)
 
-    def test_custom_maxlengths(self):
-        self.verify_max_length(PersonWithCustomMaxLengths, 'email', 384)
-        self.verify_max_length(PersonWithCustomMaxLengths, 'vcard', 1024)
-        self.verify_max_length(PersonWithCustomMaxLengths, 'homepage', 256)
-        self.verify_max_length(PersonWithCustomMaxLengths, 'avatar', 512)
+    def test_custom_max_lengths(self):
+        self.verify_max_length(PersonWithCustomMaxLengths, 'email', 250)
+        self.verify_max_length(PersonWithCustomMaxLengths, 'vcard', 250)
+        self.verify_max_length(PersonWithCustomMaxLengths, 'homepage', 250)
+        self.verify_max_length(PersonWithCustomMaxLengths, 'avatar', 250)
 
-class MaxLengthORMTests(TestCase):
+class MaxLengthORMTests(unittest.TestCase):
 
     def test_custom_max_lengths(self):
         args = {

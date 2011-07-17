@@ -1,18 +1,16 @@
-from django.conf.urls.defaults import patterns
-from django.core.exceptions import ObjectDoesNotExist
-from django.contrib.syndication import feeds
+from django.conf.urls.defaults import *
 
+import feeds
 
-class ComplexFeed(feeds.Feed):
-    def get_object(self, bits):
-        if len(bits) != 1:
-            raise ObjectDoesNotExist
-        return None
-
-
-urlpatterns = patterns('',
-    (r'^feeds/(?P<url>.*)/$', 'django.contrib.syndication.views.feed', {
-        'feed_dict': dict(
-            complex = ComplexFeed,
-        )}),
+urlpatterns = patterns('django.contrib.syndication.views',
+    (r'^syndication/complex/(?P<foo>.*)/$', feeds.ComplexFeed()),
+    (r'^syndication/rss2/$', feeds.TestRss2Feed()),
+    (r'^syndication/rss091/$', feeds.TestRss091Feed()),
+    (r'^syndication/atom/$', feeds.TestAtomFeed()),
+    (r'^syndication/custom/$', feeds.TestCustomFeed()),
+    (r'^syndication/naive-dates/$', feeds.NaiveDatesFeed()),
+    (r'^syndication/aware-dates/$', feeds.TZAwareDatesFeed()),
+    (r'^syndication/feedurl/$', feeds.TestFeedUrlFeed()),
+    (r'^syndication/articles/$', feeds.ArticlesFeed()),
+    (r'^syndication/template/$', feeds.TemplateFeed()),
 )

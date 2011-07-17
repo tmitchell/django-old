@@ -8,25 +8,26 @@ RequestContext.
 """
 
 from django.conf import settings
+from django.middleware.csrf import get_token
+from django.utils.functional import lazy
 
-def auth(request):
+def csrf(request):
     """
-    Returns context variables required by apps that use Django's authentication
-    system.
+    Context processor that provides a CSRF token, or the string 'NOTPROVIDED' if
+    it has not been provided by either a view decorator or the middleware
+    """
+    def _get_val():
+        token = get_token(request)
+        if token is None:
+            # In order to be able to provide debugging info in the
+            # case of misconfiguration, we use a sentinel value
+            # instead of returning an empty dict.
+            return 'NOTPROVIDED'
+        else:
+            return token
+    _get_val = lazy(_get_val, str)
 
-    If there is no 'user' attribute in the request, uses AnonymousUser (from
-    django.contrib.auth).
-    """
-    if hasattr(request, 'user'):
-        user = request.user
-    else:
-        from django.contrib.auth.models import AnonymousUser
-        user = AnonymousUser()
-    return {
-        'user': user,
-        'messages': user.get_and_delete_messages(),
-        'perms': PermWrapper(user),
-    }
+    return {'csrf_token': _get_val() }
 
 def debug(request):
     "Returns context variables helpful for debugging."
@@ -47,6 +48,13 @@ def i18n(request):
 
     return context_extras
 
+def static(request):
+    """
+    Adds static-related context variables to the context.
+
+    """
+    return {'STATIC_URL': settings.STATIC_URL}
+
 def media(request):
     """
     Adds media-related context variables to the context.
@@ -58,24 +66,30 @@ def request(request):
     return {'request': request}
 
 # PermWrapper and PermLookupDict proxy the permissions system into objects that
-# the template system can understand.
+# the template system can understand. They once lived here -- they have
+# been moved to django.contrib.auth.context_processors.
 
-class PermLookupDict(object):
-    def __init__(self, user, module_name):
-        self.user, self.module_name = user, module_name
+from django.contrib.auth.context_processors import PermLookupDict as RealPermLookupDict
+from django.contrib.auth.context_processors import PermWrapper as RealPermWrapper
 
-    def __repr__(self):
-        return str(self.user.get_all_permissions())
+class PermLookupDict(RealPermLookupDict):
+    def __init__(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "`django.core.context_processors.PermLookupDict` is " \
+            "deprecated; use `django.contrib.auth.context_processors.PermLookupDict` " \
+            "instead.",
+            DeprecationWarning
+        )
+        super(PermLookupDict, self).__init__(*args, **kwargs)
 
-    def __getitem__(self, perm_name):
-        return self.user.has_perm("%s.%s" % (self.module_name, perm_name))
-
-    def __nonzero__(self):
-        return self.user.has_module_perms(self.module_name)
-
-class PermWrapper(object):
-    def __init__(self, user):
-        self.user = user
-
-    def __getitem__(self, module_name):
-        return PermLookupDict(self.user, module_name)
+class PermWrapper(RealPermWrapper):
+    def __init__(self, *args, **kwargs):
+        import warnings
+        warnings.warn(
+            "`django.core.context_processors.PermWrapper` is " \
+            "deprecated; use `django.contrib.auth.context_processors.PermWrapper` " \
+            "instead.",
+            DeprecationWarning
+        )
+        super(PermWrapper, self).__init__(*args, **kwargs)

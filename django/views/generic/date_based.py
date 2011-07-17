@@ -7,6 +7,13 @@ from django.core.xheaders import populate_xheaders
 from django.db.models.fields import DateTimeField
 from django.http import Http404, HttpResponse
 
+import warnings
+warnings.warn(
+    'Function-based generic views have been deprecated; use class-based views instead.',
+    DeprecationWarning
+)
+
+
 def archive_index(request, queryset, date_field, num_latest=15,
         template_name=None, template_loader=loader,
         extra_context=None, allow_empty=True, context_processors=None,
@@ -27,7 +34,7 @@ def archive_index(request, queryset, date_field, num_latest=15,
         queryset = queryset.filter(**{'%s__lte' % date_field: datetime.datetime.now()})
     date_list = queryset.dates(date_field, 'year')[::-1]
     if not date_list and not allow_empty:
-        raise Http404, "No %s available" % model._meta.verbose_name
+        raise Http404("No %s available" % model._meta.verbose_name)
 
     if date_list and num_latest:
         latest = queryset.order_by('-'+date_field)[:num_latest]
@@ -105,6 +112,8 @@ def archive_month(request, year, month, queryset, date_field,
 
     Templates: ``<app_label>/<model_name>_archive_month.html``
     Context:
+        date_list:
+            List of days in this month with objects
         month:
             (date) this month
         next_month:
@@ -116,7 +125,8 @@ def archive_month(request, year, month, queryset, date_field,
     """
     if extra_context is None: extra_context = {}
     try:
-        date = datetime.date(*time.strptime(year+month, '%Y'+month_format)[:3])
+        tt = time.strptime("%s-%s" % (year, month), '%s-%s' % ('%Y', month_format))
+        date = datetime.date(*tt[:3])
     except ValueError:
         raise Http404
 
@@ -129,31 +139,42 @@ def archive_month(request, year, month, queryset, date_field,
         last_day = first_day.replace(year=first_day.year + 1, month=1)
     else:
         last_day = first_day.replace(month=first_day.month + 1)
-    lookup_kwargs = {'%s__range' % date_field: (first_day, last_day)}
+    lookup_kwargs = {
+        '%s__gte' % date_field: first_day,
+        '%s__lt' % date_field: last_day,
+    }
 
     # Only bother to check current date if the month isn't in the past and future objects are requested.
     if last_day >= now.date() and not allow_future:
         lookup_kwargs['%s__lte' % date_field] = now
     object_list = queryset.filter(**lookup_kwargs)
+    date_list = object_list.dates(date_field, 'day')
     if not object_list and not allow_empty:
         raise Http404
 
     # Calculate the next month, if applicable.
     if allow_future:
-        next_month = last_day + datetime.timedelta(days=1)
-    elif last_day < datetime.date.today():
-        next_month = last_day + datetime.timedelta(days=1)
+        next_month = last_day
+    elif last_day <= datetime.date.today():
+        next_month = last_day
     else:
         next_month = None
+
+    # Calculate the previous month
+    if first_day.month == 1:
+        previous_month = first_day.replace(year=first_day.year-1,month=12)
+    else:
+        previous_month = first_day.replace(month=first_day.month-1)
 
     if not template_name:
         template_name = "%s/%s_archive_month.html" % (model._meta.app_label, model._meta.object_name.lower())
     t = template_loader.get_template(template_name)
     c = RequestContext(request, {
+        'date_list': date_list,
         '%s_list' % template_object_name: object_list,
         'month': date,
         'next_month': next_month,
-        'previous_month': first_day - datetime.timedelta(days=1),
+        'previous_month': previous_month,
     }, context_processors)
     for key, value in extra_context.items():
         if callable(value):
@@ -178,7 +199,8 @@ def archive_week(request, year, week, queryset, date_field,
     """
     if extra_context is None: extra_context = {}
     try:
-        date = datetime.date(*time.strptime(year+'-0-'+week, '%Y-%w-%U')[:3])
+        tt = time.strptime(year+'-0-'+week, '%Y-%w-%U')
+        date = datetime.date(*tt[:3])
     except ValueError:
         raise Http404
 
@@ -188,7 +210,10 @@ def archive_week(request, year, week, queryset, date_field,
     # Calculate first and last day of week, for use in a date-range lookup.
     first_day = date
     last_day = date + datetime.timedelta(days=7)
-    lookup_kwargs = {'%s__range' % date_field: (first_day, last_day)}
+    lookup_kwargs = {
+        '%s__gte' % date_field: first_day,
+        '%s__lt' % date_field: last_day,
+    }
 
     # Only bother to check current date if the week isn't in the past and future objects aren't requested.
     if last_day >= now.date() and not allow_future:
@@ -231,7 +256,9 @@ def archive_day(request, year, month, day, queryset, date_field,
     """
     if extra_context is None: extra_context = {}
     try:
-        date = datetime.date(*time.strptime(year+month+day, '%Y'+month_format+day_format)[:3])
+        tt = time.strptime('%s-%s-%s' % (year, month, day),
+                           '%s-%s-%s' % ('%Y', month_format, day_format))
+        date = datetime.date(*tt[:3])
     except ValueError:
         raise Http404
 
@@ -301,7 +328,9 @@ def object_detail(request, year, month, day, queryset, date_field,
     """
     if extra_context is None: extra_context = {}
     try:
-        date = datetime.date(*time.strptime(year+month+day, '%Y'+month_format+day_format)[:3])
+        tt = time.strptime('%s-%s-%s' % (year, month, day),
+                           '%s-%s-%s' % ('%Y', month_format, day_format))
+        date = datetime.date(*tt[:3])
     except ValueError:
         raise Http404
 
@@ -321,11 +350,11 @@ def object_detail(request, year, month, day, queryset, date_field,
     elif slug and slug_field:
         lookup_kwargs['%s__exact' % slug_field] = slug
     else:
-        raise AttributeError, "Generic detail view must be called with either an object_id or a slug/slugfield"
+        raise AttributeError("Generic detail view must be called with either an object_id or a slug/slugfield")
     try:
         obj = queryset.get(**lookup_kwargs)
     except ObjectDoesNotExist:
-        raise Http404, "No %s found for" % model._meta.verbose_name
+        raise Http404("No %s found for" % model._meta.verbose_name)
     if not template_name:
         template_name = "%s/%s_detail.html" % (model._meta.app_label, model._meta.object_name.lower())
     if template_name_field:

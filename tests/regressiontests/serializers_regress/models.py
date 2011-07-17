@@ -8,12 +8,13 @@ This class sets up a model for each model field type
 from django.db import models
 from django.contrib.contenttypes import generic
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.localflavor.us.models import USStateField, PhoneNumberField
 
 # The following classes are for testing basic data
-# marshalling, including NULL values.
+# marshalling, including NULL values, where allowed.
 
 class BooleanData(models.Model):
-    data = models.BooleanField(null=True)
+    data = models.BooleanField()
 
 class CharData(models.Model):
     data = models.CharField(max_length=30, null=True)
@@ -42,17 +43,23 @@ class FloatData(models.Model):
 class IntegerData(models.Model):
     data = models.IntegerField(null=True)
 
+class BigIntegerData(models.Model):
+    data = models.BigIntegerField(null=True)
+
 # class ImageData(models.Model):
 #    data = models.ImageField(null=True)
 
 class IPAddressData(models.Model):
     data = models.IPAddressField(null=True)
 
+class GenericIPAddressData(models.Model):
+    data = models.GenericIPAddressField(null=True)
+
 class NullBooleanData(models.Model):
     data = models.NullBooleanField(null=True)
 
 class PhoneData(models.Model):
-    data = models.PhoneNumberField(null=True)
+    data = PhoneNumberField(null=True)
 
 class PositiveIntegerData(models.Model):
     data = models.PositiveIntegerField(null=True)
@@ -73,10 +80,7 @@ class TimeData(models.Model):
     data = models.TimeField(null=True)
 
 class USStateData(models.Model):
-    data = models.USStateField(null=True)
-
-class XMLData(models.Model):
-    data = models.XMLField(null=True)
+    data = USStateField(null=True)
 
 class Tag(models.Model):
     """A tag on an item."""
@@ -103,6 +107,9 @@ class Anchor(models.Model):
     something for other models to point at"""
 
     data = models.CharField(max_length=30)
+
+    class Meta:
+        ordering = ('id',)
 
 class UniqueAnchor(models.Model):
     """This is a model that can be used as
@@ -132,6 +139,14 @@ class FKDataToField(models.Model):
 class FKDataToO2O(models.Model):
     data = models.ForeignKey(O2OData, null=True)
 
+class M2MIntermediateData(models.Model):
+    data = models.ManyToManyField(Anchor, null=True, through='Intermediate')
+
+class Intermediate(models.Model):
+    left = models.ForeignKey(M2MIntermediateData)
+    right = models.ForeignKey(Anchor)
+    extra = models.CharField(max_length=30, blank=True, default="doesn't matter")
+
 # The following test classes are for validating the
 # deserialization of objects that use a user-defined
 # field as the primary key.
@@ -157,8 +172,8 @@ class DecimalPKData(models.Model):
 class EmailPKData(models.Model):
     data = models.EmailField(primary_key=True)
 
-class FilePKData(models.Model):
-    data = models.FileField(primary_key=True, upload_to='/foo/bar')
+# class FilePKData(models.Model):
+#    data = models.FileField(primary_key=True, upload_to='/foo/bar')
 
 class FilePathPKData(models.Model):
     data = models.FilePathField(primary_key=True)
@@ -175,12 +190,15 @@ class IntegerPKData(models.Model):
 class IPAddressPKData(models.Model):
     data = models.IPAddressField(primary_key=True)
 
+class GenericIPAddressPKData(models.Model):
+    data = models.GenericIPAddressField(primary_key=True)
+
 # This is just a Boolean field with null=True, and we can't test a PK value of NULL.
 # class NullBooleanPKData(models.Model):
 #     data = models.NullBooleanField(primary_key=True)
 
 class PhonePKData(models.Model):
-    data = models.PhoneNumberField(primary_key=True)
+    data = PhoneNumberField(primary_key=True)
 
 class PositiveIntegerPKData(models.Model):
     data = models.PositiveIntegerField(primary_key=True)
@@ -201,10 +219,7 @@ class SmallPKData(models.Model):
 #    data = models.TimeField(primary_key=True)
 
 class USStatePKData(models.Model):
-    data = models.USStateField(primary_key=True)
-
-# class XMLPKData(models.Model):
-#     data = models.XMLField(primary_key=True)
+    data = USStateField(primary_key=True)
 
 class ComplexModel(models.Model):
     field1 = models.CharField(max_length=10)
@@ -233,7 +248,7 @@ class AbstractBaseModel(models.Model):
 
 class InheritAbstractModel(AbstractBaseModel):
     child_data = models.IntegerField()
-    
+
 class BaseModel(models.Model):
     parent_data = models.IntegerField()
 
@@ -243,3 +258,9 @@ class InheritBaseModel(BaseModel):
 class ExplicitInheritBaseModel(BaseModel):
     parent = models.OneToOneField(BaseModel)
     child_data = models.IntegerField()
+
+class LengthModel(models.Model):
+    data = models.IntegerField()
+
+    def __len__(self):
+        return self.data

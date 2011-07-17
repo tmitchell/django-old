@@ -4,10 +4,44 @@ from django.contrib.databrowse.datastructures import EasyModel
 from django.contrib.databrowse.sites import DatabrowsePlugin
 from django.shortcuts import render_to_response
 from django.utils.text import capfirst
-from django.utils.translation import get_date_formats
 from django.utils.encoding import force_unicode
 from django.utils.safestring import mark_safe
-from django.views.generic import date_based
+from django.views.generic import dates
+from django.utils import datetime_safe
+
+
+class DateViewMixin(object):
+    allow_empty = False
+    allow_future = True
+    root_url = None
+    model = None
+    field = None
+
+    def get_context_data(self, **kwargs):
+        context = super(DateViewMixin, self).get_context_data(**kwargs)
+        context.update({
+            'root_url': self.root_url,
+            'model': self.model,
+            'field': self.field
+        })
+        return context
+
+
+class DayView(DateViewMixin, dates.DayArchiveView):
+    template_name = 'databrowse/calendar_day.html'
+
+
+class MonthView(DateViewMixin, dates.MonthArchiveView):
+    template_name = 'databrowse/calendar_month.html'
+
+
+class YearView(DateViewMixin, dates.YearArchiveView):
+    template_name = 'databrowse/calendar_year.html'
+
+
+class IndexView(DateViewMixin, dates.ArchiveIndexView):
+    template_name = 'databrowse/calendar_main.html'
+
 
 class CalendarPlugin(DatabrowsePlugin):
     def __init__(self, field_names=None):
@@ -33,12 +67,13 @@ class CalendarPlugin(DatabrowsePlugin):
 
     def urls(self, plugin_name, easy_instance_field):
         if isinstance(easy_instance_field.field, models.DateField):
+            d = easy_instance_field.raw_value
             return [mark_safe(u'%s%s/%s/%s/%s/%s/' % (
                 easy_instance_field.model.url(),
                 plugin_name, easy_instance_field.field.name,
-                easy_instance_field.raw_value.year,
-                easy_instance_field.raw_value.strftime('%b').lower(),
-                easy_instance_field.raw_value.day))]
+                str(d.year),
+                datetime_safe.new_date(d).strftime('%b').lower(),
+                d.day))]
 
     def model_view(self, request, model_databrowse, url):
         self.model, self.site = model_databrowse.model, model_databrowse.site
@@ -59,27 +94,51 @@ class CalendarPlugin(DatabrowsePlugin):
     def homepage_view(self, request):
         easy_model = EasyModel(self.site, self.model)
         field_list = self.fields.values()
-        field_list.sort(lambda x, y: cmp(x.verbose_name, y.verbose_name))
-        return render_to_response('databrowse/calendar_homepage.html', {'root_url': self.site.root_url, 'model': easy_model, 'field_list': field_list})
+        field_list.sort(key=lambda k:k.verbose_name)
+        return render_to_response('databrowse/calendar_homepage.html', {
+                'root_url': self.site.root_url,
+                'model': easy_model,
+                'field_list': field_list
+            })
 
     def calendar_view(self, request, field, year=None, month=None, day=None):
         easy_model = EasyModel(self.site, self.model)
-        queryset = easy_model.get_query_set()
-        extra_context = {'root_url': self.site.root_url, 'model': easy_model, 'field': field}
+        root_url = self.site.root_url
+
         if day is not None:
-            return date_based.archive_day(request, year, month, day, queryset, field.name,
-                template_name='databrowse/calendar_day.html', allow_empty=False, allow_future=True,
-                extra_context=extra_context)
+            return DayView.as_view(
+                                year=year, month=month, day=day,
+                                date_field=field.name,
+                                queryset=easy_model.get_query_set(),
+                                root_url=root_url,
+                                model=easy_model,
+                                field=field
+                            )(request)
         elif month is not None:
-            return date_based.archive_month(request, year, month, queryset, field.name,
-                template_name='databrowse/calendar_month.html', allow_empty=False, allow_future=True,
-                extra_context=extra_context)
+            return MonthView.as_view(
+                                year=year, month=month,
+                                date_field=field.name,
+                                queryset=easy_model.get_query_set(),
+                                root_url=root_url,
+                                model=easy_model,
+                                field=field
+                            )(request)
         elif year is not None:
-            return date_based.archive_year(request, year, queryset, field.name,
-                template_name='databrowse/calendar_year.html', allow_empty=False, allow_future=True,
-                extra_context=extra_context)
+            return YearView.as_view(
+                                year=year,
+                                date_field=field.name,
+                                queryset=easy_model.get_query_set(),
+                                root_url=root_url,
+                                model=easy_model,
+                                field=field
+                            )(request)
         else:
-            return date_based.archive_index(request, queryset, field.name,
-                template_name='databrowse/calendar_main.html', allow_empty=True, allow_future=True,
-                extra_context=extra_context)
+            return IndexView.as_view(
+                                date_field=field.name,
+                                queryset=easy_model.get_query_set(),
+                                root_url=root_url,
+                                model=easy_model,
+                                field=field
+                            )(request)
+
         assert False, ('%s, %s, %s, %s' % (field, year, month, day))

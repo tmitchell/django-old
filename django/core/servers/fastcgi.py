@@ -12,7 +12,9 @@ Run with the extra option "help" for a list of additional options you can
 pass to this server.
 """
 
-import sys, os
+import os
+import sys
+from django.utils import importlib
 
 __version__ = "0.1"
 __all__ = ["runfastcgi"]
@@ -26,25 +28,26 @@ FASTCGI_HELP = r"""
 
 Optional Fcgi settings: (setting=value)
   protocol=PROTOCOL    fcgi, scgi, ajp, ... (default fcgi)
-  host=HOSTNAME        hostname to listen on..
+  host=HOSTNAME        hostname to listen on.
   port=PORTNUM         port to listen on.
   socket=FILE          UNIX socket to listen on.
-  method=IMPL          prefork or threaded (default prefork)
-  maxrequests=NUMBER   number of requests a child handles before it is 
+  method=IMPL          prefork or threaded (default prefork).
+  maxrequests=NUMBER   number of requests a child handles before it is
                        killed and a new child is forked (0 = no limit).
-  maxspare=NUMBER      max number of spare processes / threads
+  maxspare=NUMBER      max number of spare processes / threads.
   minspare=NUMBER      min number of spare processes / threads.
-  maxchildren=NUMBER   hard limit number of processes / threads
+  maxchildren=NUMBER   hard limit number of processes / threads.
   daemonize=BOOL       whether to detach from terminal.
   pidfile=FILE         write the spawned process-id to this file.
   workdir=DIRECTORY    change to this directory when daemonizing.
+  debug=BOOL           set to true to enable flup tracebacks.
   outlog=FILE          write stdout to this file.
   errlog=FILE          write stderr to this file.
-  umask=UMASK          umask to use when daemonizing (default 022).
+  umask=UMASK          umask to use when daemonizing, in octal notation (default 022).
 
 Examples:
   Run a "standard" fastcgi process on a file-descriptor
-  (for webservers which spawn your processes for you)
+  (for Web servers which spawn your processes for you)
     $ manage.py runfcgi method=threaded
 
   Run a scgi server on a TCP host/port
@@ -72,6 +75,7 @@ FASTCGI_OPTIONS = {
     'minspare': 2,
     'maxchildren': 50,
     'maxrequests': 0,
+    'debug': None,
     'outlog': None,
     'errlog': None,
     'umask': None,
@@ -113,7 +117,7 @@ def runfastcgi(argset=[], **kwargs):
             'maxSpare': int(options["maxspare"]),
             'minSpare': int(options["minspare"]),
             'maxChildren': int(options["maxchildren"]),
-            'maxRequests': int(options["maxrequests"]), 
+            'maxRequests': int(options["maxrequests"]),
         }
         flup_module += '_fork'
     elif options['method'] in ('thread', 'threaded'):
@@ -125,10 +129,11 @@ def runfastcgi(argset=[], **kwargs):
     else:
         return fastcgi_help("ERROR: Implementation must be one of prefork or thread.")
 
-    wsgi_opts['debug'] = False # Turn off flup tracebacks
+    wsgi_opts['debug'] = options['debug'] is not None
 
     try:
-        WSGIServer = getattr(__import__('flup.' + flup_module, '', '', flup_module), 'WSGIServer')
+        module = importlib.import_module('.%s' % flup_module, 'flup')
+        WSGIServer = module.WSGIServer
     except:
         print "Can't import flup." + flup_module
         return False
@@ -162,7 +167,7 @@ def runfastcgi(argset=[], **kwargs):
     if options['errlog']:
         daemon_kwargs['err_log'] = options['errlog']
     if options['umask']:
-        daemon_kwargs['umask'] = int(options['umask'])
+        daemon_kwargs['umask'] = int(options['umask'], 8)
 
     if daemonize:
         from django.utils.daemonize import become_daemon

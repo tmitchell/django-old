@@ -3,16 +3,12 @@
 BR-specific Form helpers
 """
 
-from django.newforms import ValidationError
-from django.newforms.fields import Field, RegexField, CharField, Select, EMPTY_VALUES
+from django.core.validators import EMPTY_VALUES
+from django.forms import ValidationError
+from django.forms.fields import Field, RegexField, CharField, Select
 from django.utils.encoding import smart_unicode
 from django.utils.translation import ugettext_lazy as _
 import re
-
-try:
-    set
-except NameError:
-    from sets import Set as set     # For Python 2.3
 
 phone_digits_re = re.compile(r'^(\d{2})[-\.]?(\d{4})[-\.]?(\d{4})$')
 
@@ -21,9 +17,9 @@ class BRZipCodeField(RegexField):
         'invalid': _('Enter a zip code in the format XXXXX-XXX.'),
     }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, max_length=None, min_length=None, *args, **kwargs):
         super(BRZipCodeField, self).__init__(r'^\d{5}-\d{3}$',
-            max_length=None, min_length=None, *args, **kwargs)
+            max_length, min_length, *args, **kwargs)
 
 class BRPhoneNumberField(Field):
     default_error_messages = {
@@ -96,8 +92,8 @@ class BRCPFField(CharField):
         'digits_only': _("This field requires only numbers."),
     }
 
-    def __init__(self, *args, **kwargs):
-        super(BRCPFField, self).__init__(max_length=14, min_length=11, *args, **kwargs)
+    def __init__(self, max_length=14, min_length=11, *args, **kwargs):
+        super(BRCPFField, self).__init__(max_length, min_length, *args, **kwargs)
 
     def clean(self, value):
         """

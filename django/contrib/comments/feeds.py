@@ -1,17 +1,16 @@
 from django.conf import settings
-from django.contrib.comments.models import Comment, FreeComment
-from django.contrib.syndication.feeds import Feed
+from django.contrib.syndication.views import Feed
 from django.contrib.sites.models import Site
+from django.contrib import comments
+from django.utils.translation import ugettext as _
 
-class LatestFreeCommentsFeed(Feed):
-    """Feed of latest free comments on the current site."""
-
-    comments_class = FreeComment
+class LatestCommentFeed(Feed):
+    """Feed of latest comments on the current site."""
 
     def title(self):
         if not hasattr(self, '_site'):
             self._site = Site.objects.get_current()
-        return u"%s comments" % self._site.name
+        return _("%(site_name)s comments") % dict(site_name=self._site.name)
 
     def link(self):
         if not hasattr(self, '_site'):
@@ -21,24 +20,15 @@ class LatestFreeCommentsFeed(Feed):
     def description(self):
         if not hasattr(self, '_site'):
             self._site = Site.objects.get_current()
-        return u"Latest comments on %s" % self._site.name
-
-    def get_query_set(self):
-        return self.comments_class.objects.filter(site__pk=settings.SITE_ID, is_public=True)
+        return _("Latest comments on %(site_name)s") % dict(site_name=self._site.name)
 
     def items(self):
-        return self.get_query_set()[:40]
+        qs = comments.get_model().objects.filter(
+            site__pk = settings.SITE_ID,
+            is_public = True,
+            is_removed = False,
+        )
+        return qs.order_by('-submit_date')[:40]
 
-class LatestCommentsFeed(LatestFreeCommentsFeed):
-    """Feed of latest comments on the current site."""
-
-    comments_class = Comment
-
-    def get_query_set(self):
-        qs = super(LatestCommentsFeed, self).get_query_set()
-        qs = qs.filter(is_removed=False)
-        if settings.COMMENTS_BANNED_USERS_GROUP:
-            where = ['user_id NOT IN (SELECT user_id FROM auth_users_group WHERE group_id = %s)']
-            params = [settings.COMMENTS_BANNED_USERS_GROUP]
-            qs = qs.extra(where=where, params=params)
-        return qs
+    def item_pubdate(self, item):
+        return item.submit_date

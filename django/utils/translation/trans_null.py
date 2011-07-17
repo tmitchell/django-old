@@ -14,14 +14,20 @@ ngettext_lazy = ngettext
 def ungettext(singular, plural, number):
     return force_unicode(ngettext(singular, plural, number))
 
+def pgettext(context, message):
+    return ugettext(message)
+
+def npgettext(context, singular, plural, number):
+    return ungettext(singular, plural, number)
+
 activate = lambda x: None
 deactivate = deactivate_all = lambda: None
 get_language = lambda: settings.LANGUAGE_CODE
 get_language_bidi = lambda: settings.LANGUAGE_CODE in settings.LANGUAGES_BIDI
-get_date_formats = lambda: (settings.DATE_FORMAT, settings.DATETIME_FORMAT, settings.TIME_FORMAT)
-get_partial_date_formats = lambda: (settings.YEAR_MONTH_FORMAT, settings.MONTH_DAY_FORMAT)
 check_for_language = lambda x: True
 
+# date formats shouldn't be used using gettext anymore. This
+# is kept for backward compatibility
 TECHNICAL_ID_MAP = {
     "DATE_WITH_TIME_FULL": settings.DATETIME_FORMAT,
     "DATE_FORMAT": settings.DATE_FORMAT,
@@ -51,3 +57,7 @@ def to_locale(language):
 
 def get_language_from_request(request):
     return settings.LANGUAGE_CODE
+
+def get_language_from_path(request):
+    return None
+

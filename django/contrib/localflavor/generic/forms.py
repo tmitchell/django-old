@@ -1,4 +1,4 @@
-from django import newforms as forms
+from django import forms
 
 DEFAULT_DATE_INPUT_FORMATS = (
     '%Y-%m-%d', '%d/%m/%Y', '%d/%m/%y', # '2006-10-25', '25/10/2006', '25/10/06'
@@ -36,3 +36,13 @@ class DateTimeField(forms.DateTimeField):
     def __init__(self, input_formats=None, *args, **kwargs):
         input_formats = input_formats or DEFAULT_DATETIME_INPUT_FORMATS
         super(DateTimeField, self).__init__(input_formats=input_formats, *args, **kwargs)
+
+class SplitDateTimeField(forms.SplitDateTimeField):
+    """
+    Split date and time input fields which use non-US date and time input
+    formats by default.
+    """
+    def __init__(self, input_date_formats=None, input_time_formats=None, *args, **kwargs):
+        input_date_formats = input_date_formats or DEFAULT_DATE_INPUT_FORMATS
+        super(SplitDateTimeField, self).__init__(input_date_formats=input_date_formats,
+                                                 input_time_formats=input_time_formats, *args, **kwargs)

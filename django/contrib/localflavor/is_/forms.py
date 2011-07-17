@@ -2,9 +2,10 @@
 Iceland specific form helpers.
 """
 
-from django.newforms import ValidationError
-from django.newforms.fields import RegexField, EMPTY_VALUES
-from django.newforms.widgets import Select
+from django.core.validators import EMPTY_VALUES
+from django.forms import ValidationError
+from django.forms.fields import RegexField
+from django.forms.widgets import Select
 from django.utils.translation import ugettext_lazy as _
 from django.utils.encoding import smart_unicode
 
@@ -18,9 +19,9 @@ class ISIdNumberField(RegexField):
         'checksum': _(u'The Icelandic identification number is not valid.'),
     }
 
-    def __init__(self, *args, **kwargs):
-        kwargs['min_length'],kwargs['max_length'] = 10,11
-        super(ISIdNumberField, self).__init__(r'^\d{6}(-| )?\d{4}$', *args, **kwargs)
+    def __init__(self, max_length=11, min_length=10, *args, **kwargs):
+        super(ISIdNumberField, self).__init__(r'^\d{6}(-| )?\d{4}$',
+            max_length, min_length, *args, **kwargs)
 
     def clean(self, value):
         value = super(ISIdNumberField, self).clean(value)
@@ -60,9 +61,9 @@ class ISPhoneNumberField(RegexField):
     Icelandic phone number. Seven digits with an optional hyphen or space after
     the first three digits.
     """
-    def __init__(self, *args, **kwargs):
-        kwargs['min_length'], kwargs['max_length'] = 7,8
-        super(ISPhoneNumberField, self).__init__(r'^\d{3}(-| )?\d{4}$', *args, **kwargs)
+    def __init__(self, max_length=8, min_length=7, *args, **kwargs):
+        super(ISPhoneNumberField, self).__init__(r'^\d{3}(-| )?\d{4}$',
+            max_length, min_length, *args, **kwargs)
 
     def clean(self, value):
         value = super(ISPhoneNumberField, self).clean(value)

@@ -1,6 +1,15 @@
-from django.shortcuts import render_to_response
 from django.template import loader, RequestContext
-from django.http import HttpResponse, HttpResponsePermanentRedirect, HttpResponseGone
+from django.http import HttpResponse, HttpResponseRedirect, HttpResponsePermanentRedirect, HttpResponseGone
+from django.utils.log import getLogger
+
+import warnings
+warnings.warn(
+    'Function-based generic views have been deprecated; use class-based views instead.',
+    DeprecationWarning
+)
+
+logger = getLogger('django.request')
+
 
 def direct_to_template(request, template, extra_context=None, mimetype=None, **kwargs):
     """
@@ -18,7 +27,7 @@ def direct_to_template(request, template, extra_context=None, mimetype=None, **k
     t = loader.get_template(template)
     return HttpResponse(t.render(c), mimetype=mimetype)
 
-def redirect_to(request, url, **kwargs):
+def redirect_to(request, url, permanent=True, query_string=False, **kwargs):
     """
     Redirect to a given URL.
 
@@ -31,8 +40,25 @@ def redirect_to(request, url, **kwargs):
         )
 
     If the given url is ``None``, a HttpResponseGone (410) will be issued.
+
+    If the ``permanent`` argument is False, then the response will have a 302
+    HTTP status code. Otherwise, the status code will be 301.
+
+    If the ``query_string`` argument is True, then the GET query string
+    from the request is appended to the URL.
+
     """
+    args = request.META["QUERY_STRING"]
+    if args and query_string and url is not None:
+        url = "%s?%s" % (url, args)
+
     if url is not None:
-        return HttpResponsePermanentRedirect(url % kwargs)
+        klass = permanent and HttpResponsePermanentRedirect or HttpResponseRedirect
+        return klass(url % kwargs)
     else:
+        logger.warning('Gone: %s' % request.path,
+                    extra={
+                        'status_code': 410,
+                        'request': request
+                    })
         return HttpResponseGone()

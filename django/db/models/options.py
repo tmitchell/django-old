@@ -1,9 +1,5 @@
 import re
 from bisect import bisect
-try:
-    set
-except NameError:
-    from sets import Set as set     # Python 2.3 fallback
 
 from django.conf import settings
 from django.db.models.related import RelatedObject
@@ -11,7 +7,6 @@ from django.db.models.fields.related import ManyToManyRel
 from django.db.models.fields import AutoField, FieldDoesNotExist
 from django.db.models.fields.proxy import OrderWrt
 from django.db.models.loading import get_models, app_cache_ready
-from django.db.models import Manager
 from django.utils.translation import activate, deactivate_all, get_language, string_concat
 from django.utils.encoding import force_unicode, smart_str
 from django.utils.datastructures import SortedDict
@@ -19,14 +14,15 @@ from django.utils.datastructures import SortedDict
 # Calculate the verbose_name by converting from InitialCaps to "lowercase with spaces".
 get_verbose_name = lambda class_name: re.sub('(((?<=[a-z])[A-Z])|([A-Z](?![A-Z]|$)))', ' \\1', class_name).lower().strip()
 
-DEFAULT_NAMES = ('verbose_name', 'db_table', 'ordering',
+DEFAULT_NAMES = ('verbose_name', 'verbose_name_plural', 'db_table', 'ordering',
                  'unique_together', 'permissions', 'get_latest_by',
                  'order_with_respect_to', 'app_label', 'db_tablespace',
-                 'abstract')
+                 'abstract', 'managed', 'proxy', 'auto_created')
 
 class Options(object):
     def __init__(self, meta, app_label=None):
         self.local_fields, self.local_many_to_many = [], []
+        self.virtual_fields = []
         self.module_name, self.verbose_name = None, None
         self.verbose_name_plural = None
         self.db_table = ''
@@ -41,10 +37,22 @@ class Options(object):
         self.meta = meta
         self.pk = None
         self.has_auto_field, self.auto_field = False, None
-        self.one_to_one_field = None
         self.abstract = False
+        self.managed = True
+        self.proxy = False
+        self.proxy_for_model = None
         self.parents = SortedDict()
         self.duplicate_targets = {}
+        self.auto_created = False
+
+        # To handle various inheritance situations, we need to track where
+        # managers came from (concrete or abstract base classes).
+        self.abstract_managers = []
+        self.concrete_managers = []
+
+        # List of all lookups defined in ForeignKey 'limit_choices_to' options
+        # from *other* models. Needed for some admin checks. Internal use only.
+        self.related_fkey_lookups = []
 
     def contribute_to_class(self, cls, name):
         from django.db import connection
@@ -75,18 +83,19 @@ class Options(object):
             # unique_together can be either a tuple of tuples, or a single
             # tuple of two strings. Normalize it to a tuple of tuples, so that
             # calling code can uniformly expect that.
-            ut = meta_attrs.pop('unique_together', getattr(self, 'unique_together'))
+            ut = meta_attrs.pop('unique_together', self.unique_together)
             if ut and not isinstance(ut[0], (tuple, list)):
                 ut = (ut,)
-            setattr(self, 'unique_together', ut)
+            self.unique_together = ut
 
             # verbose_name_plural is a special case because it uses a 's'
             # by default.
-            setattr(self, 'verbose_name_plural', meta_attrs.pop('verbose_name_plural', string_concat(self.verbose_name, 's')))
+            if self.verbose_name_plural is None:
+                self.verbose_name_plural = string_concat(self.verbose_name, 's')
 
             # Any leftover attributes must be invalid.
             if meta_attrs != {}:
-                raise TypeError, "'class Meta' got invalid attribute(s): %s" % ','.join(meta_attrs.keys())
+                raise TypeError("'class Meta' got invalid attribute(s): %s" % ','.join(meta_attrs.keys()))
         else:
             self.verbose_name_plural = string_concat(self.verbose_name, 's')
         del self.meta
@@ -96,11 +105,11 @@ class Options(object):
             self.db_table = "%s_%s" % (self.app_label, self.module_name)
             self.db_table = truncate_name(self.db_table, connection.ops.max_name_length())
 
-
     def _prepare(self, model):
         if self.order_with_respect_to:
             self.order_with_respect_to = self.get_field(self.order_with_respect_to)
             self.ordering = ('_order',)
+            model.add_to_class('_order', OrderWrt())
         else:
             self.order_with_respect_to = None
 
@@ -109,6 +118,12 @@ class Options(object):
                 # Promote the first parent link in lieu of adding yet another
                 # field.
                 field = self.parents.value_for_index(0)
+                # Look for a local field with the same name as the
+                # first parent link. If a local field has already been
+                # created, use it instead of promoting the parent
+                already_created = [fld for fld in self.local_fields if fld.name == field.name]
+                if already_created:
+                    field = already_created[0]
                 field.primary_key = True
                 self.setup_pk(field)
             else:
@@ -153,10 +168,22 @@ class Options(object):
         if hasattr(self, '_name_map'):
             del self._name_map
 
+    def add_virtual_field(self, field):
+        self.virtual_fields.append(field)
+
     def setup_pk(self, field):
         if not self.pk and field.primary_key:
             self.pk = field
             field.serialize = False
+
+    def setup_proxy(self, target):
+        """
+        Does the internal setup so that the current model is a proxy for
+        "target".
+        """
+        self.pk = target._meta.pk
+        self.proxy_for_model = target
+        self.db_table = target._meta.db_table
 
     def __repr__(self):
         return '<Options for %s>' % self.object_name
@@ -254,7 +281,7 @@ class Options(object):
         for f in to_search:
             if f.name == name:
                 return f
-        raise FieldDoesNotExist, '%s has no field named %r' % (self.object_name, name)
+        raise FieldDoesNotExist('%s has no field named %r' % (self.object_name, name))
 
     def get_field_by_name(self, name):
         """
@@ -281,7 +308,9 @@ class Options(object):
     def get_all_field_names(self):
         """
         Returns a list of all field names that are possible for this model
-        (including reverse relation names).
+        (including reverse relation names). This is used for pretty printing
+        debugging output (a list of choices), so any internal-only field names
+        are not included.
         """
         try:
             cache = self._name_map
@@ -289,7 +318,9 @@ class Options(object):
             cache = self.init_name_map()
         names = cache.keys()
         names.sort()
-        return names
+        # Internal-only names end with "+" (symmetrical m2m related names being
+        # the main example). Trim them.
+        return [val for val in names if not val.endswith('+')]
 
     def init_name_map(self):
         """
@@ -306,8 +337,6 @@ class Options(object):
             cache[f.name] = (f, model, True, True)
         for f, model in self.get_fields_with_model():
             cache[f.name] = (f, model, True, False)
-        if self.order_with_respect_to:
-            cache['_order'] = OrderWrt(), None, True, False
         if app_cache_ready():
             self._name_map = cache
         return cache
@@ -321,16 +350,12 @@ class Options(object):
     def get_delete_permission(self):
         return 'delete_%s' % self.object_name.lower()
 
-    def get_all_related_objects(self, local_only=False):
-        try:
-            self._related_objects_cache
-        except AttributeError:
-            self._fill_related_objects_cache()
-        if local_only:
-            return [k for k, v in self._related_objects_cache.items() if not v]
-        return self._related_objects_cache.keys()
+    def get_all_related_objects(self, local_only=False, include_hidden=False):
+        return [k for k, v in self.get_all_related_objects_with_model(
+                local_only=local_only, include_hidden=include_hidden)]
 
-    def get_all_related_objects_with_model(self):
+    def get_all_related_objects_with_model(self, local_only=False,
+                                           include_hidden=False):
         """
         Returns a list of (related-object, model) pairs. Similar to
         get_fields_with_model().
@@ -339,20 +364,26 @@ class Options(object):
             self._related_objects_cache
         except AttributeError:
             self._fill_related_objects_cache()
-        return self._related_objects_cache.items()
+        predicates = []
+        if local_only:
+            predicates.append(lambda k, v: not v)
+        if not include_hidden:
+            predicates.append(lambda k, v: not k.field.rel.is_hidden())
+        return filter(lambda t: all([p(*t) for p in predicates]),
+                      self._related_objects_cache.items())
 
     def _fill_related_objects_cache(self):
         cache = SortedDict()
         parent_list = self.get_parent_list()
         for parent in self.parents:
-            for obj, model in parent._meta.get_all_related_objects_with_model():
+            for obj, model in parent._meta.get_all_related_objects_with_model(include_hidden=True):
                 if (obj.field.creation_counter < 0 or obj.field.rel.parent_link) and obj.model not in parent_list:
                     continue
                 if not model:
                     cache[obj] = parent
                 else:
                     cache[obj] = model
-        for klass in get_models():
+        for klass in get_models(include_auto_created=True, only_installed=False):
             for f in klass._meta.local_fields:
                 if f.rel and not isinstance(f.rel.to, str) and self == f.rel.to._meta:
                     cache[RelatedObject(f.rel.to, klass, f)] = None
@@ -389,35 +420,13 @@ class Options(object):
                     cache[obj] = parent
                 else:
                     cache[obj] = model
-        for klass in get_models():
+        for klass in get_models(only_installed=False):
             for f in klass._meta.local_many_to_many:
                 if f.rel and not isinstance(f.rel.to, str) and self == f.rel.to._meta:
                     cache[RelatedObject(f.rel.to, klass, f)] = None
         if app_cache_ready():
             self._related_many_to_many_cache = cache
         return cache
-
-    def get_followed_related_objects(self, follow=None):
-        if follow == None:
-            follow = self.get_follow()
-        return [f for f in self.get_all_related_objects() if follow.get(f.name, None)]
-
-    def get_data_holders(self, follow=None):
-        if follow == None:
-            follow = self.get_follow()
-        return [f for f in self.fields + self.many_to_many + self.get_all_related_objects() if follow.get(f.name, None)]
-
-    def get_follow(self, override=None):
-        follow = {}
-        for f in self.fields + self.many_to_many + self.get_all_related_objects():
-            if override and f.name in override:
-                child_override = override[f.name]
-            else:
-                child_override = None
-            fol = f.get_follow(child_override)
-            if fol != None:
-                follow[f.name] = fol
-        return follow
 
     def get_base_chain(self, model):
         """
@@ -448,6 +457,26 @@ class Options(object):
             result.update(parent._meta.get_parent_list())
         return result
 
+    def get_ancestor_link(self, ancestor):
+        """
+        Returns the field on the current model which points to the given
+        "ancestor". This is possible an indirect link (a pointer to a parent
+        model, which points, eventually, to the ancestor). Used when
+        constructing table joins for model inheritance.
+
+        Returns None if the model isn't an ancestor of this one.
+        """
+        if ancestor in self.parents:
+            return self.parents[ancestor]
+        for parent in self.parents:
+            # Tries to get a link field from the immediate parent
+            parent_link = parent._meta.get_ancestor_link(ancestor)
+            if parent_link:
+                # In case of a proxied model, the first link
+                # of the chain to the ancestor is that parent
+                # links
+                return self.parents[parent] or parent_link
+
     def get_ordered_objects(self):
         "Returns a list of Options objects that are ordered with respect to this object."
         if not hasattr(self, '_ordered_objects'):
@@ -461,101 +490,8 @@ class Options(object):
             self._ordered_objects = objects
         return self._ordered_objects
 
-    def has_field_type(self, field_type, follow=None):
+    def pk_index(self):
         """
-        Returns True if this object's admin form has at least one of the given
-        field_type (e.g. FileField).
+        Returns the index of the primary key field in the self.fields list.
         """
-        # TODO: follow
-        if not hasattr(self, '_field_types'):
-            self._field_types = {}
-        if field_type not in self._field_types:
-            try:
-                # First check self.fields.
-                for f in self.fields:
-                    if isinstance(f, field_type):
-                        raise StopIteration
-                # Failing that, check related fields.
-                for related in self.get_followed_related_objects(follow):
-                    for f in related.opts.fields:
-                        if isinstance(f, field_type):
-                            raise StopIteration
-            except StopIteration:
-                self._field_types[field_type] = True
-            else:
-                self._field_types[field_type] = False
-        return self._field_types[field_type]
-
-class AdminOptions(object):
-    def __init__(self, fields=None, js=None, list_display=None, list_display_links=None, list_filter=None,
-        date_hierarchy=None, save_as=False, ordering=None, search_fields=None,
-        save_on_top=False, list_select_related=False, manager=None, list_per_page=100):
-        self.fields = fields
-        self.js = js or []
-        self.list_display = list_display or ['__str__']
-        self.list_display_links = list_display_links or []
-        self.list_filter = list_filter or []
-        self.date_hierarchy = date_hierarchy
-        self.save_as, self.ordering = save_as, ordering
-        self.search_fields = search_fields or []
-        self.save_on_top = save_on_top
-        self.list_select_related = list_select_related
-        self.list_per_page = list_per_page
-        self.manager = manager or Manager()
-
-    def get_field_sets(self, opts):
-        "Returns a list of AdminFieldSet objects for this AdminOptions object."
-        if self.fields is None:
-            field_struct = ((None, {'fields': [f.name for f in opts.fields + opts.many_to_many if f.editable and not isinstance(f, AutoField)]}),)
-        else:
-            field_struct = self.fields
-        new_fieldset_list = []
-        for fieldset in field_struct:
-            fs_options = fieldset[1]
-            classes = fs_options.get('classes', ())
-            description = fs_options.get('description', '')
-            new_fieldset_list.append(AdminFieldSet(fieldset[0], classes,
-                opts.get_field, fs_options['fields'], description))
-        return new_fieldset_list
-
-    def contribute_to_class(self, cls, name):
-        cls._meta.admin = self
-        # Make sure the admin manager has access to the model
-        self.manager.model = cls
-
-class AdminFieldSet(object):
-    def __init__(self, name, classes, field_locator_func, line_specs, description):
-        self.name = name
-        self.field_lines = [AdminFieldLine(field_locator_func, line_spec) for line_spec in line_specs]
-        self.classes = classes
-        self.description = description
-
-    def __repr__(self):
-        return "FieldSet: (%s, %s)" % (self.name, self.field_lines)
-
-    def bind(self, field_mapping, original, bound_field_set_class):
-        return bound_field_set_class(self, field_mapping, original)
-
-    def __iter__(self):
-        for field_line in self.field_lines:
-            yield field_line
-
-    def __len__(self):
-        return len(self.field_lines)
-
-class AdminFieldLine(object):
-    def __init__(self, field_locator_func, linespec):
-        if isinstance(linespec, basestring):
-            self.fields = [field_locator_func(linespec)]
-        else:
-            self.fields = [field_locator_func(field_name) for field_name in linespec]
-
-    def bind(self, field_mapping, original, bound_field_line_class):
-        return bound_field_line_class(self, field_mapping, original)
-
-    def __iter__(self):
-        for field in self.fields:
-            yield field
-
-    def __len__(self):
-        return len(self.fields)
+        return self.fields.index(self.pk)

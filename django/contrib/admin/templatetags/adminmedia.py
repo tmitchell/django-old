@@ -1,14 +1,15 @@
+import warnings
 from django.template import Library
+from django.templatetags.static import PrefixNode
 
 register = Library()
 
+@register.simple_tag
 def admin_media_prefix():
     """
     Returns the string contained in the setting ADMIN_MEDIA_PREFIX.
     """
-    try:
-        from django.conf import settings
-    except ImportError:
-        return ''
-    return settings.ADMIN_MEDIA_PREFIX
-admin_media_prefix = register.simple_tag(admin_media_prefix)
+    warnings.warn(
+        "The admin_media_prefix template tag is deprecated. "
+        "Use the static template tag instead.", PendingDeprecationWarning)
+    return PrefixNode.handle_simple("ADMIN_MEDIA_PREFIX")

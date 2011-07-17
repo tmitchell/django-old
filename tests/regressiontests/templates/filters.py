@@ -7,9 +7,9 @@ timezones are only evaluated at the moment of execution and will therefore be
 consistent.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
-from django.utils.tzinfo import LocalTimezone
+from django.utils.tzinfo import LocalTimezone, FixedOffset
 from django.utils.safestring import mark_safe
 
 # These two classes are used to test auto-escaping of __unicode__ output.
@@ -27,6 +27,9 @@ class SafeClass:
 def get_filter_tests():
     now = datetime.now()
     now_tz = datetime.now(LocalTimezone(now))
+    now_tz_i = datetime.now(FixedOffset((3 * 60) + 15)) # imaginary time zone
+    today = date.today()
+
     return {
         # Default compare with datetime.now()
         'filter-timesince01' : ('{{ a|timesince }}', {'a': datetime.now() + timedelta(minutes=-1, seconds = -10)}, '1 minute'),
@@ -34,11 +37,29 @@ def get_filter_tests():
         'filter-timesince03' : ('{{ a|timesince }}', {'a': datetime.now() - timedelta(hours=1, minutes=25, seconds = 10)}, '1 hour, 25 minutes'),
 
         # Compare to a given parameter
-        'filter-timesince04' : ('{{ a|timesince:b }}', {'a':now + timedelta(days=2), 'b':now + timedelta(days=1)}, '1 day'),
-        'filter-timesince05' : ('{{ a|timesince:b }}', {'a':now + timedelta(days=2, minutes=1), 'b':now + timedelta(days=2)}, '1 minute'),
+        'filter-timesince04' : ('{{ a|timesince:b }}', {'a':now - timedelta(days=2), 'b':now - timedelta(days=1)}, '1 day'),
+        'filter-timesince05' : ('{{ a|timesince:b }}', {'a':now - timedelta(days=2, minutes=1), 'b':now - timedelta(days=2)}, '1 minute'),
 
         # Check that timezone is respected
-        'filter-timesince06' : ('{{ a|timesince:b }}', {'a':now_tz + timedelta(hours=8), 'b':now_tz}, '8 hours'),
+        'filter-timesince06' : ('{{ a|timesince:b }}', {'a':now_tz - timedelta(hours=8), 'b':now_tz}, '8 hours'),
+
+        # Regression for #7443
+        'filter-timesince07': ('{{ earlier|timesince }}', { 'earlier': now - timedelta(days=7) }, '1 week'),
+        'filter-timesince08': ('{{ earlier|timesince:now }}', { 'now': now, 'earlier': now - timedelta(days=7) }, '1 week'),
+        'filter-timesince09': ('{{ later|timesince }}', { 'later': now + timedelta(days=7) }, '0 minutes'),
+        'filter-timesince10': ('{{ later|timesince:now }}', { 'now': now, 'later': now + timedelta(days=7) }, '0 minutes'),
+
+        # Ensures that differing timezones are calculated correctly
+        'filter-timesince11' : ('{{ a|timesince }}', {'a': now}, '0 minutes'),
+        'filter-timesince12' : ('{{ a|timesince }}', {'a': now_tz}, '0 minutes'),
+        'filter-timesince13' : ('{{ a|timesince }}', {'a': now_tz_i}, '0 minutes'),
+        'filter-timesince14' : ('{{ a|timesince:b }}', {'a': now_tz, 'b': now_tz_i}, '0 minutes'),
+        'filter-timesince15' : ('{{ a|timesince:b }}', {'a': now, 'b': now_tz_i}, ''),
+        'filter-timesince16' : ('{{ a|timesince:b }}', {'a': now_tz_i, 'b': now}, ''),
+
+        # Regression for #9065 (two date objects).
+        'filter-timesince17' : ('{{ a|timesince:b }}', {'a': today, 'b': today}, '0 minutes'),
+        'filter-timesince18' : ('{{ a|timesince:b }}', {'a': today, 'b': today + timedelta(hours=24)}, '1 day'),
 
         # Default compare with datetime.now()
         'filter-timeuntil01' : ('{{ a|timeuntil }}', {'a':datetime.now() + timedelta(minutes=2, seconds = 10)}, '2 minutes'),
@@ -48,6 +69,20 @@ def get_filter_tests():
         # Compare to a given parameter
         'filter-timeuntil04' : ('{{ a|timeuntil:b }}', {'a':now - timedelta(days=1), 'b':now - timedelta(days=2)}, '1 day'),
         'filter-timeuntil05' : ('{{ a|timeuntil:b }}', {'a':now - timedelta(days=2), 'b':now - timedelta(days=2, minutes=1)}, '1 minute'),
+
+        # Regression for #7443
+        'filter-timeuntil06': ('{{ earlier|timeuntil }}', { 'earlier': now - timedelta(days=7) }, '0 minutes'),
+        'filter-timeuntil07': ('{{ earlier|timeuntil:now }}', { 'now': now, 'earlier': now - timedelta(days=7) }, '0 minutes'),
+        'filter-timeuntil08': ('{{ later|timeuntil }}', { 'later': now + timedelta(days=7, hours=1) }, '1 week'),
+        'filter-timeuntil09': ('{{ later|timeuntil:now }}', { 'now': now, 'later': now + timedelta(days=7) }, '1 week'),
+
+        # Ensures that differing timezones are calculated correctly
+        'filter-timeuntil10' : ('{{ a|timeuntil }}', {'a': now_tz_i}, '0 minutes'),
+        'filter-timeuntil11' : ('{{ a|timeuntil:b }}', {'a': now_tz_i, 'b': now_tz}, '0 minutes'),
+
+        # Regression for #9065 (two date objects).
+        'filter-timeuntil12' : ('{{ a|timeuntil:b }}', {'a': today, 'b': today}, '0 minutes'),
+        'filter-timeuntil13' : ('{{ a|timeuntil:b }}', {'a': today, 'b': today - timedelta(hours=24)}, '1 day'),
 
         'filter-addslash01': ("{% autoescape off %}{{ a|addslashes }} {{ b|addslashes }}{% endautoescape %}", {"a": "<a>'", "b": mark_safe("<a>'")}, ur"<a>\' <a>\'"),
         'filter-addslash02': ("{{ a|addslashes }} {{ b|addslashes }}", {"a": "<a>'", "b": mark_safe("<a>'")}, ur"&lt;a&gt;\&#39; <a>\'"),
@@ -85,13 +120,19 @@ def get_filter_tests():
 
         # Notice that escaping is applied *after* any filters, so the string
         # formatting here only needs to deal with pre-escaped characters.
-        'filter-stringformat01': ('{% autoescape off %}.{{ a|stringformat:"5s" }}. .{{ b|stringformat:"5s" }}.{% endautoescape %}', {"a": "a<b", "b": mark_safe("a<b")}, u".  a<b. .  a<b."),
-        'filter-stringformat02': ('.{{ a|stringformat:"5s" }}. .{{ b|stringformat:"5s" }}.', {"a": "a<b", "b": mark_safe("a<b")}, u".  a&lt;b. .  a<b."),
+        'filter-stringformat01': ('{% autoescape off %}.{{ a|stringformat:"5s" }}. .{{ b|stringformat:"5s" }}.{% endautoescape %}',
+            {"a": "a<b", "b": mark_safe("a<b")}, u".  a<b. .  a<b."),
+        'filter-stringformat02': ('.{{ a|stringformat:"5s" }}. .{{ b|stringformat:"5s" }}.', {"a": "a<b", "b": mark_safe("a<b")},
+            u".  a&lt;b. .  a<b."),
 
-        # XXX No test for "title" filter; needs an actual object.
+        # Test the title filter
+        'filter-title1' : ('{{ a|title }}', {'a' : 'JOE\'S CRAB SHACK'}, u'Joe&#39;s Crab Shack'),
+        'filter-title2' : ('{{ a|title }}', {'a' : '555 WEST 53RD STREET'}, u'555 West 53rd Street'),
 
-        'filter-truncatewords01': ('{% autoescape off %}{{ a|truncatewords:"2" }} {{ b|truncatewords:"2"}}{% endautoescape %}', {"a": "alpha & bravo", "b": mark_safe("alpha &amp; bravo")}, u"alpha & ... alpha &amp; ..."),
-        'filter-truncatewords02': ('{{ a|truncatewords:"2" }} {{ b|truncatewords:"2"}}', {"a": "alpha & bravo", "b": mark_safe("alpha &amp; bravo")}, u"alpha &amp; ... alpha &amp; ..."),
+        'filter-truncatewords01': ('{% autoescape off %}{{ a|truncatewords:"2" }} {{ b|truncatewords:"2"}}{% endautoescape %}',
+            {"a": "alpha & bravo", "b": mark_safe("alpha &amp; bravo")}, u"alpha & ... alpha &amp; ..."),
+        'filter-truncatewords02': ('{{ a|truncatewords:"2" }} {{ b|truncatewords:"2"}}',
+            {"a": "alpha & bravo", "b": mark_safe("alpha &amp; bravo")}, u"alpha &amp; ... alpha &amp; ..."),
 
         # The "upper" filter messes up entities (which are case-sensitive),
         # so it's not safe for non-escaping purposes.
@@ -161,7 +202,7 @@ def get_filter_tests():
         'filter-force-escape05': ('{% autoescape off %}{{ a|force_escape|escape }}{% endautoescape %}', {"a": "x&y"}, u"x&amp;y"),
         'filter-force-escape06': ('{{ a|force_escape|escape }}', {"a": "x&y"}, u"x&amp;y"),
         'filter-force-escape07': ('{% autoescape off %}{{ a|escape|force_escape }}{% endautoescape %}', {"a": "x&y"}, u"x&amp;y"),
-        'filter-force-escape07': ('{{ a|escape|force_escape }}', {"a": "x&y"}, u"x&amp;y"),
+        'filter-force-escape08': ('{{ a|escape|force_escape }}', {"a": "x&y"}, u"x&amp;y"),
 
         # The contents in "linebreaks" and "linebreaksbr" are escaped
         # according to the current autoescape setting.
@@ -173,6 +214,9 @@ def get_filter_tests():
 
         'filter-safe01': ("{{ a }} -- {{ a|safe }}", {"a": u"<b>hello</b>"}, "&lt;b&gt;hello&lt;/b&gt; -- <b>hello</b>"),
         'filter-safe02': ("{% autoescape off %}{{ a }} -- {{ a|safe }}{% endautoescape %}", {"a": "<b>hello</b>"}, u"<b>hello</b> -- <b>hello</b>"),
+
+        'filter-safeseq01': ('{{ a|join:", " }} -- {{ a|safeseq|join:", " }}', {"a": ["&", "<"]}, "&amp;, &lt; -- &, <"),
+        'filter-safeseq02': ('{% autoescape off %}{{ a|join:", " }} -- {{ a|safeseq|join:", " }}{% endautoescape %}', {"a": ["&", "<"]}, "&, < -- &, <"),
 
         'filter-removetags01': ('{{ a|removetags:"a b" }} {{ b|removetags:"a b" }}', {"a": "<a>x</a> <p><b>y</b></p>", "b": mark_safe("<a>x</a> <p><b>y</b></p>")}, u"x &lt;p&gt;y&lt;/p&gt; x <p>y</p>"),
         'filter-removetags02': ('{% autoescape off %}{{ a|removetags:"a b" }} {{ b|removetags:"a b" }}{% endautoescape %}', {"a": "<a>x</a> <p><b>y</b></p>", "b": mark_safe("<a>x</a> <p><b>y</b></p>")}, u"x <p>y</p> x <p>y</p>"),
@@ -213,12 +257,17 @@ def get_filter_tests():
 
         'filter-phone2numeric01': ('{{ a|phone2numeric }} {{ b|phone2numeric }}', {"a": "<1-800-call-me>", "b": mark_safe("<1-800-call-me>") }, "&lt;1-800-2255-63&gt; <1-800-2255-63>"),
         'filter-phone2numeric02': ('{% autoescape off %}{{ a|phone2numeric }} {{ b|phone2numeric }}{% endautoescape %}', {"a": "<1-800-call-me>", "b": mark_safe("<1-800-call-me>") }, "<1-800-2255-63> <1-800-2255-63>"),
+        'filter-phone2numeric03': ('{{ a|phone2numeric }}', {"a": "How razorback-jumping frogs can level six piqued gymnasts!"}, "469 729672225-5867464 37647 226 53835 749 747833 49662787!"),
 
         # Ensure iriencode keeps safe strings:
         'filter-iriencode01': ('{{ url|iriencode }}', {'url': '?test=1&me=2'}, '?test=1&amp;me=2'),
         'filter-iriencode02': ('{% autoescape off %}{{ url|iriencode }}{% endautoescape %}', {'url': '?test=1&me=2'}, '?test=1&me=2'),
         'filter-iriencode03': ('{{ url|iriencode }}', {'url': mark_safe('?test=1&me=2')}, '?test=1&me=2'),
         'filter-iriencode04': ('{% autoescape off %}{{ url|iriencode }}{% endautoescape %}', {'url': mark_safe('?test=1&me=2')}, '?test=1&me=2'),
+
+        # urlencode
+        'filter-urlencode01': ('{{ url|urlencode }}', {'url': '/test&"/me?/'}, '/test%26%22/me%3F/'),
+        'filter-urlencode02': ('/test/{{ urlbit|urlencode:"" }}/', {'urlbit': 'escape/slash'}, '/test/escape%2Fslash/'),
 
         # Chaining a bunch of safeness-preserving filters should not alter
         # the safe status either way.
@@ -249,5 +298,57 @@ def get_filter_tests():
         'autoescape-stringfilter02': (r'{% autoescape off %}{{ unsafe|capfirst }}{% endautoescape %}', {'unsafe': UnsafeClass()}, 'You & me'),
         'autoescape-stringfilter03': (r'{{ safe|capfirst }}', {'safe': SafeClass()}, 'You &gt; me'),
         'autoescape-stringfilter04': (r'{% autoescape off %}{{ safe|capfirst }}{% endautoescape %}', {'safe': SafeClass()}, 'You &gt; me'),
-    }
 
+        'escapejs01': (r'{{ a|escapejs }}', {'a': 'testing\r\njavascript \'string" <b>escaping</b>'}, 'testing\\u000D\\u000Ajavascript \\u0027string\\u0022 \\u003Cb\\u003Eescaping\\u003C/b\\u003E'),
+        'escapejs02': (r'{% autoescape off %}{{ a|escapejs }}{% endautoescape %}', {'a': 'testing\r\njavascript \'string" <b>escaping</b>'}, 'testing\\u000D\\u000Ajavascript \\u0027string\\u0022 \\u003Cb\\u003Eescaping\\u003C/b\\u003E'),
+
+
+        # length filter.
+        'length01': ('{{ list|length }}', {'list': ['4', None, True, {}]}, '4'),
+        'length02': ('{{ list|length }}', {'list': []}, '0'),
+        'length03': ('{{ string|length }}', {'string': ''}, '0'),
+        'length04': ('{{ string|length }}', {'string': 'django'}, '6'),
+        # Invalid uses that should fail silently.
+        'length05': ('{{ int|length }}', {'int': 7}, ''),
+        'length06': ('{{ None|length }}', {'None': None}, ''),
+
+        # length_is filter.
+        'length_is01': ('{% if some_list|length_is:"4" %}Four{% endif %}', {'some_list': ['4', None, True, {}]}, 'Four'),
+        'length_is02': ('{% if some_list|length_is:"4" %}Four{% else %}Not Four{% endif %}', {'some_list': ['4', None, True, {}, 17]}, 'Not Four'),
+        'length_is03': ('{% if mystring|length_is:"4" %}Four{% endif %}', {'mystring': 'word'}, 'Four'),
+        'length_is04': ('{% if mystring|length_is:"4" %}Four{% else %}Not Four{% endif %}', {'mystring': 'Python'}, 'Not Four'),
+        'length_is05': ('{% if mystring|length_is:"4" %}Four{% else %}Not Four{% endif %}', {'mystring': ''}, 'Not Four'),
+        'length_is06': ('{% with var|length as my_length %}{{ my_length }}{% endwith %}', {'var': 'django'}, '6'),
+        # Boolean return value from length_is should not be coerced to a string
+        'length_is07': (r'{% if "X"|length_is:0 %}Length is 0{% else %}Length not 0{% endif %}', {}, 'Length not 0'),
+        'length_is08': (r'{% if "X"|length_is:1 %}Length is 1{% else %}Length not 1{% endif %}', {}, 'Length is 1'),
+        # Invalid uses that should fail silently.
+        'length_is09': ('{{ var|length_is:"fish" }}', {'var': 'django'}, ''),
+        'length_is10': ('{{ int|length_is:"1" }}', {'int': 7}, ''),
+        'length_is11': ('{{ none|length_is:"1" }}', {'none': None}, ''),
+
+        'join01': (r'{{ a|join:", " }}', {'a': ['alpha', 'beta & me']}, 'alpha, beta &amp; me'),
+        'join02': (r'{% autoescape off %}{{ a|join:", " }}{% endautoescape %}', {'a': ['alpha', 'beta & me']}, 'alpha, beta & me'),
+        'join03': (r'{{ a|join:" &amp; " }}', {'a': ['alpha', 'beta & me']}, 'alpha &amp; beta &amp; me'),
+        'join04': (r'{% autoescape off %}{{ a|join:" &amp; " }}{% endautoescape %}', {'a': ['alpha', 'beta & me']}, 'alpha &amp; beta & me'),
+
+        # Test that joining with unsafe joiners don't result in unsafe strings (#11377)
+        'join05': (r'{{ a|join:var }}', {'a': ['alpha', 'beta & me'], 'var': ' & '}, 'alpha &amp; beta &amp; me'), 
+        'join06': (r'{{ a|join:var }}', {'a': ['alpha', 'beta & me'], 'var': mark_safe(' & ')}, 'alpha & beta &amp; me'), 
+        'join07': (r'{{ a|join:var|lower }}', {'a': ['Alpha', 'Beta & me'], 'var': ' & ' }, 'alpha &amp; beta &amp; me'), 
+        'join08': (r'{{ a|join:var|lower }}', {'a': ['Alpha', 'Beta & me'], 'var': mark_safe(' & ')}, 'alpha & beta &amp; me'), 
+        
+        'date01': (r'{{ d|date:"m" }}', {'d': datetime(2008, 1, 1)}, '01'),
+        'date02': (r'{{ d|date }}', {'d': datetime(2008, 1, 1)}, 'Jan. 1, 2008'),
+        #Ticket 9520: Make sure |date doesn't blow up on non-dates
+        'date03': (r'{{ d|date:"m" }}', {'d': 'fail_string'}, ''),
+
+         # Tests for #11687
+         'add01': (r'{{ i|add:"5" }}', {'i': 2000}, '2005'),
+         'add02': (r'{{ i|add:"napis" }}', {'i': 2000}, '2000'),
+         'add03': (r'{{ i|add:16 }}', {'i': 'not_an_int'}, 'not_an_int'),
+         'add04': (r'{{ i|add:"16" }}', {'i': 'not_an_int'}, 'not_an_int16'),
+         'add05': (r'{{ l1|add:l2 }}', {'l1': [1, 2], 'l2': [3, 4]}, '[1, 2, 3, 4]'),
+         'add06': (r'{{ t1|add:t2 }}', {'t1': (3, 4), 't2': (1, 2)}, '(3, 4, 1, 2)'),
+         'add07': (r'{{ d|add:t }}', {'d': date(2000, 1, 1), 't': timedelta(10)}, 'Jan. 11, 2000'),
+    }

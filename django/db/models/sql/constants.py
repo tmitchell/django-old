@@ -4,7 +4,7 @@ import re
 QUERY_TERMS = dict([(x, None) for x in (
     'exact', 'iexact', 'contains', 'icontains', 'gt', 'gte', 'lt', 'lte', 'in',
     'startswith', 'istartswith', 'endswith', 'iendswith', 'range', 'year',
-    'month', 'day', 'isnull', 'search', 'regex', 'iregex',
+    'month', 'day', 'week_day', 'isnull', 'search', 'regex', 'iregex',
     )])
 
 # Size of each "chunk" for get_iterator calls.
@@ -15,7 +15,8 @@ GET_ITERATOR_CHUNK_SIZE = 100
 LOOKUP_SEP = '__'
 
 # Constants to make looking up tuple values clearer.
-# Join lists
+# Join lists (indexes into the tuples that are values in the alias_map
+# dictionary in the Query class).
 TABLE_NAME = 0
 RHS_ALIAS = 1
 JOIN_TYPE = 2

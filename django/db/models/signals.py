@@ -1,12 +1,16 @@
-class_prepared = object()
+from django.dispatch import Signal
 
-pre_init= object()
-post_init = object()
+class_prepared = Signal(providing_args=["class"])
 
-pre_save = object()
-post_save = object()
+pre_init = Signal(providing_args=["instance", "args", "kwargs"])
+post_init = Signal(providing_args=["instance"])
 
-pre_delete = object()
-post_delete = object()
+pre_save = Signal(providing_args=["instance", "raw", "using"])
+post_save = Signal(providing_args=["instance", "raw", "created", "using"])
 
-post_syncdb = object()
+pre_delete = Signal(providing_args=["instance", "using"])
+post_delete = Signal(providing_args=["instance", "using"])
+
+post_syncdb = Signal(providing_args=["class", "app", "created_models", "verbosity", "interactive"])
+
+m2m_changed = Signal(providing_args=["action", "instance", "reverse", "model", "pk_set", "using"])

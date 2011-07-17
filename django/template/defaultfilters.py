@@ -2,16 +2,23 @@
 
 import re
 import random as random_module
-try:
-    from functools import wraps
-except ImportError:
-    from django.utils.functional import wraps  # Python 2.3, 2.4 fallback.
+import unicodedata
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from functools import wraps
+from pprint import pformat
 
-from django.template import Variable, Library
+from django.template.base import Variable, Library
 from django.conf import settings
-from django.utils.translation import ugettext, ungettext
+from django.utils import formats
+from django.utils.dateformat import format, time_format
 from django.utils.encoding import force_unicode, iri_to_uri
-from django.utils.safestring import mark_safe, SafeData
+from django.utils.html import (conditional_escape, escapejs, fix_ampersands,
+    escape, urlize as urlize_impl, linebreaks, strip_tags)
+from django.utils.http import urlquote
+from django.utils.text import Truncator, wrap, phone2numeric
+from django.utils.safestring import mark_safe, SafeData, mark_for_escaping
+from django.utils.timesince import timesince, timeuntil
+from django.utils.translation import ugettext, ungettext
 
 register = Library()
 
@@ -45,7 +52,6 @@ def stringfilter(func):
 # STRINGS         #
 ###################
 
-
 def addslashes(value):
     """
     Adds slashes before quotes. Useful for escaping strings in CSV, for
@@ -62,31 +68,30 @@ def capfirst(value):
 capfirst.is_safe=True
 capfirst = stringfilter(capfirst)
 
-_js_escapes = (
-    ('\\', '\\\\'),
-    ('"', '\\"'),
-    ("'", "\\'"),
-    ('\n', '\\n'),
-    ('\r', '\\r'),
-    ('\b', '\\b'),
-    ('\f', '\\f'),
-    ('\t', '\\t'),
-    ('\v', '\\v'),
-    ('</', '<\\/'),
-)
-def escapejs(value):
-    """Backslash-escapes characters for use in JavaScript strings."""
-    for bad, good in _js_escapes:
-        value = value.replace(bad, good)
-    return value
-escapejs = stringfilter(escapejs)
+@register.filter("escapejs")
+@stringfilter
+def escapejs_filter(value):
+    """Hex encodes characters for use in JavaScript strings."""
+    return escapejs(value)
 
-def fix_ampersands(value):
+@register.filter("fix_ampersands")
+@stringfilter
+def fix_ampersands_filter(value):
     """Replaces ampersands with ``&amp;`` entities."""
-    from django.utils.html import fix_ampersands
     return fix_ampersands(value)
-fix_ampersands.is_safe=True
-fix_ampersands = stringfilter(fix_ampersands)
+fix_ampersands_filter.is_safe=True
+
+# Values for testing floatformat input against infinity and NaN representations,
+# which differ across platforms and Python versions.  Some (i.e. old Windows
+# ones) are not recognized by Decimal but we want to return them unchanged vs.
+# returning an empty string as we do for completley invalid input.  Note these
+# need to be built up from values that are not inf/nan, since inf/nan values do
+# not reload properly from .pyc files on Windows prior to some level of Python 2.5
+# (see Python Issue757815 and Issue1080440).
+pos_inf = 1e200 * 1e200
+neg_inf = -1e200 * 1e200
+nan = (1e200 * 1e200) / (1e200 * 1e200)
+special_floats = [str(pos_inf), str(neg_inf), str(nan)]
 
 def floatformat(text, arg=-1):
     """
@@ -115,24 +120,54 @@ def floatformat(text, arg=-1):
     * {{ num1|floatformat:"-3" }} displays "34.232"
     * {{ num2|floatformat:"-3" }} displays "34"
     * {{ num3|floatformat:"-3" }} displays "34.260"
+
+    If the input float is infinity or NaN, the (platform-dependent) string
+    representation of that value will be displayed.
     """
+
     try:
-        f = float(text)
-    except (ValueError, TypeError):
+        input_val = force_unicode(text)
+        d = Decimal(input_val)
+    except UnicodeEncodeError:
         return u''
+    except InvalidOperation:
+        if input_val in special_floats:
+            return input_val
+        try:
+            d = Decimal(force_unicode(float(text)))
+        except (ValueError, InvalidOperation, TypeError, UnicodeEncodeError):
+            return u''
     try:
-        d = int(arg)
+        p = int(arg)
     except ValueError:
-        return force_unicode(f)
+        return input_val
+
     try:
-        m = f - int(f)
-    except OverflowError:
-        return force_unicode(f)
-    if not m and d < 0:
-        return mark_safe(u'%d' % int(f))
+        m = int(d) - d
+    except (ValueError, OverflowError, InvalidOperation):
+        return input_val
+
+    if not m and p < 0:
+        return mark_safe(formats.number_format(u'%d' % (int(d)), 0))
+
+    if p == 0:
+        exp = Decimal(1)
     else:
-        formatstr = u'%%.%df' % abs(d)
-        return mark_safe(formatstr % f)
+        exp = Decimal(u'1.0') / (Decimal(10) ** abs(p))
+    try:
+        # Avoid conversion to scientific notation by accessing `sign`, `digits`
+        # and `exponent` from `Decimal.as_tuple()` directly.
+        sign, digits, exponent = d.quantize(exp, ROUND_HALF_UP).as_tuple()
+        digits = [unicode(digit) for digit in reversed(digits)]
+        while len(digits) <= abs(exponent):
+            digits.append(u'0')
+        digits.insert(-exponent, u'.')
+        if sign:
+            digits.append(u'-')
+        number = u''.join(reversed(digits))
+        return mark_safe(formats.number_format(number, abs(p)))
+    except InvalidOperation:
+        return input_val
 floatformat.is_safe = True
 
 def iriencode(value):
@@ -143,7 +178,6 @@ iriencode = stringfilter(iriencode)
 
 def linenumbers(value, autoescape=None):
     """Displays text with line numbers."""
-    from django.utils.html import escape
     lines = value.split(u'\n')
     # Find the maximum width of the line count, for use with zero padding
     # string format command
@@ -181,7 +215,6 @@ def slugify(value):
     Normalizes string, converts to lowercase, removes non-alpha characters,
     and converts spaces to hyphens.
     """
-    import unicodedata
     value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore')
     value = unicode(re.sub('[^\w\s-]', '', value).strip().lower())
     return mark_safe(re.sub('[-\s]+', '-', value))
@@ -206,22 +239,38 @@ stringformat.is_safe = True
 
 def title(value):
     """Converts a string into titlecase."""
-    return re.sub("([a-z])'([A-Z])", lambda m: m.group(0).lower(), value.title())
+    t = re.sub("([a-z])'([A-Z])", lambda m: m.group(0).lower(), value.title())
+    return re.sub("\d([A-Z])", lambda m: m.group(0).lower(), t)
 title.is_safe = True
 title = stringfilter(title)
+
+def truncatechars(value, arg):
+    """
+    Truncates a string after a certain number of characters.
+
+    Argument: Number of characters to truncate after.
+    """
+    try:
+        length = int(arg)
+    except ValueError: # Invalid literal for int().
+        return value # Fail silently.
+    return Truncator(value).chars(value, length)
+truncatechars.is_safe = True
+truncatechars = stringfilter(truncatechars)
 
 def truncatewords(value, arg):
     """
     Truncates a string after a certain number of words.
 
     Argument: Number of words to truncate after.
+
+    Newlines within the string are removed.
     """
-    from django.utils.text import truncate_words
     try:
         length = int(arg)
     except ValueError: # Invalid literal for int().
         return value # Fail silently.
-    return truncate_words(value, length)
+    return Truncator(value).words(length, truncate=' ...')
 truncatewords.is_safe = True
 truncatewords = stringfilter(truncatewords)
 
@@ -230,13 +279,14 @@ def truncatewords_html(value, arg):
     Truncates HTML after a certain number of words.
 
     Argument: Number of words to truncate after.
+
+    Newlines in the HTML are preserved.
     """
-    from django.utils.text import truncate_html_words
     try:
         length = int(arg)
     except ValueError: # invalid literal for int()
         return value # Fail silently.
-    return truncate_html_words(value, length)
+    return Truncator(value).words(length, html=True, truncate=' ...')
 truncatewords_html.is_safe = True
 truncatewords_html = stringfilter(truncatewords_html)
 
@@ -246,20 +296,29 @@ def upper(value):
 upper.is_safe = False
 upper = stringfilter(upper)
 
-def urlencode(value):
-    """Escapes a value for use in a URL."""
-    from django.utils.http import urlquote
-    return urlquote(value)
+def urlencode(value, safe=None):
+    """
+    Escapes a value for use in a URL.
+
+    Takes an optional ``safe`` parameter used to determine the characters which
+    should not be escaped by Django's ``urlquote`` method. If not provided, the
+    default safe characters will be used (but an empty string can be provided
+    when *all* characters should be escaped).
+    """
+    kwargs = {}
+    if safe is not None:
+        kwargs['safe'] = safe
+    return urlquote(value, **kwargs)
 urlencode.is_safe = False
 urlencode = stringfilter(urlencode)
 
+@register.filter
+@stringfilter
 def urlize(value, autoescape=None):
     """Converts URLs in plain text into clickable links."""
-    from django.utils.html import urlize
-    return mark_safe(urlize(value, nofollow=True, autoescape=autoescape))
-urlize.is_safe=True
+    return mark_safe(urlize_impl(value, nofollow=True, autoescape=autoescape))
+urlize.is_safe = True
 urlize.needs_autoescape = True
-urlize = stringfilter(urlize)
 
 def urlizetrunc(value, limit, autoescape=None):
     """
@@ -268,8 +327,7 @@ def urlizetrunc(value, limit, autoescape=None):
 
     Argument: Length to truncate URLs to.
     """
-    from django.utils.html import urlize
-    return mark_safe(urlize(value, trim_url_limit=int(limit), nofollow=True,
+    return mark_safe(urlize_impl(value, trim_url_limit=int(limit), nofollow=True,
                             autoescape=autoescape))
 urlizetrunc.is_safe = True
 urlizetrunc.needs_autoescape = True
@@ -287,7 +345,6 @@ def wordwrap(value, arg):
 
     Argument: number of characters to wrap the text at.
     """
-    from django.utils.text import wrap
     return wrap(value, int(arg))
 wordwrap.is_safe = True
 wordwrap = stringfilter(wordwrap)
@@ -333,14 +390,14 @@ cut = stringfilter(cut)
 # HTML STRINGS    #
 ###################
 
-def escape(value):
+@register.filter("escape")
+@stringfilter
+def escape_filter(value):
     """
     Marks the value as a string that should not be auto-escaped.
     """
-    from django.utils.safestring import mark_for_escaping
     return mark_for_escaping(value)
-escape.is_safe = True
-escape = stringfilter(escape)
+escape_filter.is_safe = True
 
 def force_escape(value):
     """
@@ -348,23 +405,22 @@ def force_escape(value):
     characters (as opposed to "escape", which marks the content for later
     possible escaping).
     """
-    from django.utils.html import escape
     return mark_safe(escape(value))
 force_escape = stringfilter(force_escape)
 force_escape.is_safe = True
 
-def linebreaks(value, autoescape=None):
+@register.filter("linebreaks")
+@stringfilter
+def linebreaks_filter(value, autoescape=None):
     """
     Replaces line breaks in plain text with appropriate HTML; a single
     newline becomes an HTML line break (``<br />``) and a new line
     followed by a blank line becomes a paragraph break (``</p>``).
     """
-    from django.utils.html import linebreaks
     autoescape = autoescape and not isinstance(value, SafeData)
     return mark_safe(linebreaks(value, autoescape))
-linebreaks.is_safe = True
-linebreaks.needs_autoescape = True
-linebreaks = stringfilter(linebreaks)
+linebreaks_filter.is_safe = True
+linebreaks_filter.needs_autoescape = True
 
 def linebreaksbr(value, autoescape=None):
     """
@@ -372,7 +428,6 @@ def linebreaksbr(value, autoescape=None):
     (``<br />``).
     """
     if autoescape and not isinstance(value, SafeData):
-        from django.utils.html import escape
         value = escape(value)
     return mark_safe(value.replace('\n', '<br />'))
 linebreaksbr.is_safe = True
@@ -383,10 +438,18 @@ def safe(value):
     """
     Marks the value as a string that should not be auto-escaped.
     """
-    from django.utils.safestring import mark_safe
     return mark_safe(value)
 safe.is_safe = True
 safe = stringfilter(safe)
+
+def safeseq(value):
+    """
+    A "safe" filter for sequences. Marks each element in the sequence,
+    individually, as safe, after converting them to unicode. Returns a list
+    with the results.
+    """
+    return [mark_safe(force_unicode(obj)) for obj in value]
+safeseq.is_safe = True
 
 def removetags(value, tags):
     """Removes a space separated list of [X]HTML tags from the output."""
@@ -402,7 +465,6 @@ removetags = stringfilter(removetags)
 
 def striptags(value):
     """Strips all [X]HTML tags."""
-    from django.utils.html import strip_tags
     return strip_tags(value)
 striptags.is_safe = True
 striptags = stringfilter(striptags)
@@ -416,10 +478,7 @@ def dictsort(value, arg):
     Takes a list of dicts, returns that list sorted by the property given in
     the argument.
     """
-    var_resolve = Variable(arg).resolve
-    decorated = [(var_resolve(item), item) for item in value]
-    decorated.sort()
-    return [item[1] for item in decorated]
+    return sorted(value, key=Variable(arg).resolve)
 dictsort.is_safe = False
 
 def dictsortreversed(value, arg):
@@ -427,11 +486,7 @@ def dictsortreversed(value, arg):
     Takes a list of dicts, returns that list sorted in reverse order by the
     property given in the argument.
     """
-    var_resolve = Variable(arg).resolve
-    decorated = [(var_resolve(item), item) for item in value]
-    decorated.sort()
-    decorated.reverse()
-    return [item[1] for item in decorated]
+    return sorted(value, key=Variable(arg).resolve, reverse=True)
 dictsortreversed.is_safe = False
 
 def first(value):
@@ -442,19 +497,20 @@ def first(value):
         return u''
 first.is_safe = False
 
-def join(value, arg):
-    """Joins a list with a string, like Python's ``str.join(list)``."""
+def join(value, arg, autoescape=None):
+    """
+    Joins a list with a string, like Python's ``str.join(list)``.
+    """
+    value = map(force_unicode, value)
+    if autoescape:
+        value = [conditional_escape(v) for v in value]
     try:
-        data = arg.join(map(force_unicode, value))
+        data = conditional_escape(arg).join(value)
     except AttributeError: # fail silently but nicely
         return value
-    safe_args = reduce(lambda lhs, rhs: lhs and isinstance(rhs, SafeData),
-            value, True)
-    if safe_args:
-        return mark_safe(data)
-    else:
-        return data
+    return mark_safe(data)
 join.is_safe = True
+join.needs_autoescape = True
 
 def last(value):
     "Returns the last item in a list"
@@ -466,13 +522,19 @@ last.is_safe = True
 
 def length(value):
     """Returns the length of the value - useful for lists."""
-    return len(value)
+    try:
+        return len(value)
+    except (ValueError, TypeError):
+        return ''
 length.is_safe = True
 
 def length_is(value, arg):
     """Returns a boolean of whether the value's length is the argument."""
-    return len(value) == int(arg)
-length_is.is_safe = True
+    try:
+        return len(value) == int(arg)
+    except (ValueError, TypeError):
+        return ''
+length_is.is_safe = False
 
 def random(value):
     """Returns a random item from the list."""
@@ -522,7 +584,6 @@ def unordered_list(value, autoescape=None):
         </li>
     """
     if autoescape:
-        from django.utils.html import conditional_escape
         escaper = conditional_escape
     else:
         escaper = lambda x: x
@@ -541,6 +602,10 @@ def unordered_list(value, autoescape=None):
         first_item, second_item = list_
         if second_item == []:
             return [first_item], True
+        try:
+            it = iter(second_item)  # see if second item is iterable
+        except TypeError:
+            return list_, False
         old_style_list = True
         new_second_item = []
         for sublist in second_item:
@@ -590,7 +655,13 @@ unordered_list.needs_autoescape = True
 
 def add(value, arg):
     """Adds the arg to the value."""
-    return int(value) + int(arg)
+    try:
+        return int(value) + int(arg)
+    except (ValueError, TypeError):
+        try:
+            return value + arg
+        except:
+            return value
 add.is_safe = False
 
 def get_digit(value, arg):
@@ -619,44 +690,57 @@ get_digit.is_safe = False
 
 def date(value, arg=None):
     """Formats a date according to the given format."""
-    from django.utils.dateformat import format
     if not value:
         return u''
     if arg is None:
         arg = settings.DATE_FORMAT
-    return format(value, arg)
+    try:
+        return formats.date_format(value, arg)
+    except AttributeError:
+        try:
+            return format(value, arg)
+        except AttributeError:
+            return ''
 date.is_safe = False
 
 def time(value, arg=None):
     """Formats a time according to the given format."""
-    from django.utils.dateformat import time_format
     if value in (None, u''):
         return u''
     if arg is None:
         arg = settings.TIME_FORMAT
-    return time_format(value, arg)
+    try:
+        return formats.time_format(value, arg)
+    except AttributeError:
+        try:
+            return time_format(value, arg)
+        except AttributeError:
+            return ''
 time.is_safe = False
 
-def timesince(value, arg=None):
+@register.filter("timesince")
+def timesince_filter(value, arg=None):
     """Formats a date as the time since that date (i.e. "4 days, 6 hours")."""
-    from django.utils.timesince import timesince
     if not value:
         return u''
-    if arg:
-        return timesince(arg, value)
-    return timesince(value)
-timesince.is_safe = False
+    try:
+        if arg:
+            return timesince(value, arg)
+        return timesince(value)
+    except (ValueError, TypeError):
+        return u''
+timesince_filter.is_safe = False
 
-def timeuntil(value, arg=None):
+@register.filter("timeuntil")
+def timeuntil_filter(value, arg=None):
     """Formats a date as the time until that date (i.e. "4 days, 6 hours")."""
-    from django.utils.timesince import timesince
-    from datetime import datetime
     if not value:
         return u''
-    if arg:
-        return timesince(arg, value)
-    return timesince(datetime.now(), value)
-timeuntil.is_safe = False
+    try:
+        return timeuntil(value, arg)
+    except (ValueError, TypeError):
+        return u''
+timeuntil_filter.is_safe = False
 
 ###################
 # LOGIC           #
@@ -722,16 +806,22 @@ def filesizeformat(bytes):
     """
     try:
         bytes = float(bytes)
-    except TypeError:
-        return u"0 bytes"
+    except (TypeError,ValueError,UnicodeDecodeError):
+        return ungettext("%(size)d byte", "%(size)d bytes", 0) % {'size': 0}
+
+    filesize_number_format = lambda value: formats.number_format(round(value, 1), 1)
 
     if bytes < 1024:
         return ungettext("%(size)d byte", "%(size)d bytes", bytes) % {'size': bytes}
     if bytes < 1024 * 1024:
-        return ugettext("%.1f KB") % (bytes / 1024)
+        return ugettext("%s KB") % filesize_number_format(bytes / 1024)
     if bytes < 1024 * 1024 * 1024:
-        return ugettext("%.1f MB") % (bytes / (1024 * 1024))
-    return ugettext("%.1f GB") % (bytes / (1024 * 1024 * 1024))
+        return ugettext("%s MB") % filesize_number_format(bytes / (1024 * 1024))
+    if bytes < 1024 * 1024 * 1024 * 1024:
+        return ugettext("%s GB") % filesize_number_format(bytes / (1024 * 1024 * 1024))
+    if bytes < 1024 * 1024 * 1024 * 1024 * 1024:
+        return ugettext("%s TB") % filesize_number_format(bytes / (1024 * 1024 * 1024 * 1024))
+    return ugettext("%s PB") % filesize_number_format(bytes / (1024 * 1024 * 1024 * 1024 * 1024))
 filesizeformat.is_safe = True
 
 def pluralize(value, arg=u's'):
@@ -778,15 +868,14 @@ def pluralize(value, arg=u's'):
     return singular_suffix
 pluralize.is_safe = False
 
-def phone2numeric(value):
+@register.filter("phone2numeric")
+def phone2numeric_filter(value):
     """Takes a phone number and converts it in to its numerical equivalent."""
-    from django.utils.text import phone2numeric
     return phone2numeric(value)
-phone2numeric.is_safe = True
+phone2numeric_filter.is_safe = True
 
 def pprint(value):
     """A wrapper around pprint.pprint -- for debugging, really."""
-    from pprint import pformat
     try:
         return pformat(value)
     except Exception, e:
@@ -805,11 +894,8 @@ register.filter(default_if_none)
 register.filter(dictsort)
 register.filter(dictsortreversed)
 register.filter(divisibleby)
-register.filter(escape)
-register.filter(escapejs)
 register.filter(filesizeformat)
 register.filter(first)
-register.filter(fix_ampersands)
 register.filter(floatformat)
 register.filter(force_escape)
 register.filter(get_digit)
@@ -818,33 +904,29 @@ register.filter(join)
 register.filter(last)
 register.filter(length)
 register.filter(length_is)
-register.filter(linebreaks)
 register.filter(linebreaksbr)
 register.filter(linenumbers)
 register.filter(ljust)
 register.filter(lower)
 register.filter(make_list)
-register.filter(phone2numeric)
 register.filter(pluralize)
 register.filter(pprint)
 register.filter(removetags)
 register.filter(random)
 register.filter(rjust)
 register.filter(safe)
+register.filter(safeseq)
 register.filter('slice', slice_)
 register.filter(slugify)
 register.filter(stringformat)
 register.filter(striptags)
 register.filter(time)
-register.filter(timesince)
-register.filter(timeuntil)
 register.filter(title)
 register.filter(truncatewords)
 register.filter(truncatewords_html)
 register.filter(unordered_list)
 register.filter(upper)
 register.filter(urlencode)
-register.filter(urlize)
 register.filter(urlizetrunc)
 register.filter(wordcount)
 register.filter(wordwrap)

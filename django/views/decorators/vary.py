@@ -1,9 +1,6 @@
-try:
-    from functools import wraps
-except ImportError:
-    from django.utils.functional import wraps  # Python 2.3, 2.4 fallback.
-
+from functools import wraps
 from django.utils.cache import patch_vary_headers
+from django.utils.decorators import available_attrs
 
 def vary_on_headers(*headers):
     """
@@ -17,11 +14,12 @@ def vary_on_headers(*headers):
     Note that the header names are not case-sensitive.
     """
     def decorator(func):
+        @wraps(func, assigned=available_attrs(func))
         def inner_func(*args, **kwargs):
             response = func(*args, **kwargs)
             patch_vary_headers(response, headers)
             return response
-        return wraps(func)(inner_func)
+        return inner_func
     return decorator
 
 def vary_on_cookie(func):
@@ -33,8 +31,9 @@ def vary_on_cookie(func):
         def index(request):
             ...
     """
+    @wraps(func, assigned=available_attrs(func))
     def inner_func(*args, **kwargs):
         response = func(*args, **kwargs)
         patch_vary_headers(response, ('Cookie',))
         return response
-    return wraps(func)(inner_func)
+    return inner_func

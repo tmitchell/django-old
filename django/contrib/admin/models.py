@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.models import User
+from django.contrib.admin.util import quote
 from django.utils.translation import ugettext_lazy as _
 from django.utils.encoding import smart_unicode
 from django.utils.safestring import mark_safe
@@ -32,6 +33,17 @@ class LogEntry(models.Model):
     def __repr__(self):
         return smart_unicode(self.action_time)
 
+    def __unicode__(self):
+
+        if self.action_flag == ADDITION:
+            return _('Added "%(object)s".') % {'object': self.object_repr}
+        elif self.action_flag == CHANGE:
+            return _('Changed "%(object)s" - %(changes)s') % {'object': self.object_repr, 'changes': self.change_message}
+        elif self.action_flag == DELETION:
+            return _('Deleted "%(object)s."') % {'object': self.object_repr}
+
+        return _('LogEntry Object')
+
     def is_addition(self):
         return self.action_flag == ADDITION
 
@@ -50,4 +62,6 @@ class LogEntry(models.Model):
         Returns the admin URL to edit the object represented by this log entry.
         This is relative to the Django admin index page.
         """
-        return mark_safe(u"%s/%s/%s/" % (self.content_type.app_label, self.content_type.model, self.object_id))
+        if self.content_type and self.object_id:
+            return mark_safe(u"%s/%s/%s/" % (self.content_type.app_label, self.content_type.model, quote(self.object_id)))
+        return None

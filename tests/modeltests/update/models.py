@@ -21,54 +21,15 @@ class RelatedPoint(models.Model):
         return unicode(self.name)
 
 
-__test__ = {'API_TESTS': """
->>> DataPoint(name="d0", value="apple").save()
->>> DataPoint(name="d2", value="banana").save()
->>> d3 = DataPoint(name="d3", value="banana")
->>> d3.save()
->>> RelatedPoint(name="r1", data=d3).save()
+class A(models.Model):
+    x = models.IntegerField(default=10)
 
-Objects are updated by first filtering the candidates into a queryset and then
-calling the update() method. It executes immediately and returns nothing.
+class B(models.Model):
+    a = models.ForeignKey(A)
+    y = models.IntegerField(default=10)
 
->>> DataPoint.objects.filter(value="apple").update(name="d1")
->>> DataPoint.objects.filter(value="apple")
-[<DataPoint: d1>]
+class C(models.Model):
+    y = models.IntegerField(default=10)
 
-We can update multiple objects at once.
-
->>> DataPoint.objects.filter(value="banana").update(value="pineapple")
->>> DataPoint.objects.get(name="d2").value
-u'pineapple'
-
-Foreign key fields can also be updated, although you can only update the object
-referred to, not anything inside the related object.
-
->>> d = DataPoint.objects.get(name="d1")
->>> RelatedPoint.objects.filter(name="r1").update(data=d)
->>> RelatedPoint.objects.filter(data__name="d1")
-[<RelatedPoint: r1>]
-
-Multiple fields can be updated at once
-
->>> DataPoint.objects.filter(value="pineapple").update(value="fruit", another_value="peaches")
->>> d = DataPoint.objects.get(name="d2")
->>> d.value, d.another_value
-(u'fruit', u'peaches')
-
-In the rare case you want to update every instance of a model, update() is also
-a manager method.
-
->>> DataPoint.objects.update(value='thing')
->>> DataPoint.objects.values('value').distinct()
-[{'value': u'thing'}]
-
-We do not support update on already sliced query sets.
-
->>> DataPoint.objects.all()[:2].update(another_value='another thing')
-Traceback (most recent call last):
-    ...
-AssertionError: Cannot update a query once a slice has been taken.
-
-"""
-}
+class D(C):
+    a = models.ForeignKey(A)

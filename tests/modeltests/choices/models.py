@@ -22,18 +22,3 @@ class Person(models.Model):
 
     def __unicode__(self):
         return self.name
-
-__test__ = {'API_TESTS':"""
->>> a = Person(name='Adrian', gender='M')
->>> a.save()
->>> s = Person(name='Sara', gender='F')
->>> s.save()
->>> a.gender
-'M'
->>> s.gender
-'F'
->>> a.get_gender_display()
-u'Male'
->>> s.get_gender_display()
-u'Female'
-"""}
