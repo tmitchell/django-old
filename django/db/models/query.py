@@ -334,6 +334,46 @@ class QuerySet(object):
             except IntegrityError, e:
                 return self.get(**kwargs), False
 
+    def _child(self, *parents):
+        model_parents = tuple(self.model._meta.parents.keys())
+        if not model_parents:
+            raise ValueError("%r is not a child model; it has no parents"
+                             % self.model)
+        attrs = {}
+        for parent in parents:
+            if not isinstance(parent, model_parents):
+                raise ValueError("%r is not a parent instance of %r"
+                                % (parent, self.model))
+            for field in parent._meta.fields:
+                if field.name not in attrs:
+                    attrs[field.name] = getattr(parent, field.name)
+            attrs[self.model._meta.parents[parent.__class__].name] = parent
+        return attrs
+
+    def prepare_child(self, *parents):
+        """
+        Creates and returns a new object with the given model instances as
+        parents.  The object is *not* saved to the database.
+        """
+        assert parents, \
+            "prepare_child() must be passed at least one parent instance"
+        attrs = self._child(*parents)
+        return self.model(**attrs)
+
+    def create_child(self, *parents, **kwargs):
+        """
+        Creates a new object with the given model instances as parents, updates
+        it with the given kwargs, saves it to the database, and returns the
+        created object.
+        """
+        assert parents, \
+            "create_child() must be passed at least one parent instance"
+        attrs = self._child(*parents)
+        attrs.update(kwargs)
+        obj = self.model(**attrs)
+        obj.save()
+        return obj
+
     def latest(self, field_name=None):
         """
         Returns the latest object, according to the model's 'get_latest_by'

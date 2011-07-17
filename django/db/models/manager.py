@@ -87,6 +87,12 @@ class Manager(object):
     def create(self, **kwargs):
         return self.get_query_set().create(**kwargs)
 
+    def prepare_child(self, *args):
+        return self.get_query_set().prepare_child(*args)
+
+    def create_child(self, *args, **kwargs):
+        return self.get_query_set().create_child(*args, **kwargs)
+
     def filter(self, *args, **kwargs):
         return self.get_query_set().filter(*args, **kwargs)
 
