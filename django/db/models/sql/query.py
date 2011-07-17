@@ -125,6 +125,7 @@ class Query(object):
         self.order_by = []
         self.low_mark, self.high_mark = 0, None  # Used for offset/limit
         self.distinct = False
+        self.distinct_fields = None
         self.select_for_update = False
         self.select_for_update_nowait = False
         self.select_related = False
@@ -256,6 +257,7 @@ class Query(object):
         obj.order_by = self.order_by[:]
         obj.low_mark, obj.high_mark = self.low_mark, self.high_mark
         obj.distinct = self.distinct
+        obj.distinct_fields = self.distinct_fields
         obj.select_for_update = self.select_for_update
         obj.select_for_update_nowait = self.select_for_update_nowait
         obj.select_related = self.select_related
@@ -384,7 +386,7 @@ class Query(object):
         Performs a COUNT() query using the current filter constraints.
         """
         obj = self.clone()
-        if len(self.select) > 1 or self.aggregate_select:
+        if len(self.select) > 1 or self.aggregate_select or (self.distinct and self.distinct_fields):
             # If a select clause exists, then the query has already started to
             # specify the columns that are to be returned.
             # In this case, we need to use a subquery to evaluate the count.
@@ -1555,6 +1557,15 @@ class Query(object):
         """
         self.select = []
         self.select_fields = []
+
+    def add_distinct_fields(self, field_names):
+        self.distinct_fields = []
+        options = self.get_meta()
+
+        for name in field_names:
+            field, source, opts, join_list, last, _ = self.setup_joins(
+                name.split(LOOKUP_SEP), options, self.get_initial_alias(), False)
+            self.distinct_fields.append(field.column)
 
     def add_fields(self, field_names, allow_m2m=True):
         """

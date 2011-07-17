@@ -74,8 +74,12 @@ class SQLCompiler(object):
             params.extend(val[1])
 
         result = ['SELECT']
+
         if self.query.distinct:
-            result.append('DISTINCT')
+            distinct_sql = self.connection.ops.distinct(
+                self.query.model._meta.db_table, self.query.distinct_fields)
+            result.append(distinct_sql)
+
         result.append(', '.join(out_cols + self.query.ordering_aliases))
 
         result.append('FROM')

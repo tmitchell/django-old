@@ -139,7 +139,7 @@ Though you usually won't create one manually -- you'll go through a
         clause or a default ordering on the model. ``False`` otherwise.
 
     .. attribute:: db
-    
+
         The database that will be used if this query is executed now.
 
     .. note::
@@ -345,7 +345,7 @@ undefined afterward).
 distinct
 ~~~~~~~~
 
-.. method:: distinct()
+.. method:: distinct(*fields)
 
 Returns a new ``QuerySet`` that uses ``SELECT DISTINCT`` in its SQL query. This
 eliminates duplicate rows from the query results.
@@ -355,6 +355,16 @@ is rarely a problem, because simple queries such as ``Blog.objects.all()``
 don't introduce the possibility of duplicate result rows. However, if your
 query spans multiple tables, it's possible to get duplicate results when a
 ``QuerySet`` is evaluated. That's when you'd use ``distinct()``.
+
+.. versionadded:: 1.4
+   ``distinct()`` takes optional positional arguments ``*fields``, which specify
+   field names to which the ``DISTINCT`` should be limited. This translates to
+   a ``SELECT DISTINCT ON`` SQL query. Note that this ``DISTINCT ON`` query is
+   only available in PostgreSQL.
+
+.. note::
+    When optional ``*fields`` are given, you will have to add an :meth:`order_by`
+    call with the same field names as the leftmost arguments.
 
 .. note::
     Any fields used in an :meth:`order_by` call are included in the SQL
