@@ -139,7 +139,7 @@ Though you usually won't create one manually -- you'll go through a
         clause or a default ordering on the model. ``False`` otherwise.
 
     .. attribute:: db
-
+    
         The database that will be used if this query is executed now.
 
     .. note::
