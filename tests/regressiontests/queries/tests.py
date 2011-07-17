@@ -1721,6 +1721,10 @@ class ConditionalTests(BaseQuerysetTest):
                 StaffTag.objects.distinct('staff','tag'),
                 ['<StaffTag: t1 -> p1>'],
             ),
+            (
+                Tag.objects.order_by('parent__pk').distinct('parent'),
+                ['<Tag: t3>', '<Tag: t5>', '<Tag: t1>'],
+            )
         )
 
         for qset, expected in qsets:
