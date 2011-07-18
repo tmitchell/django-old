@@ -105,6 +105,7 @@ class ItalianRestaurant(Restaurant):
     def __unicode__(self):
         return u"%s the italian restaurant" % self.name
 
+
 class Supplier(Place):
     customers = models.ManyToManyField(Restaurant, related_name='provider')
 
@@ -118,6 +119,15 @@ class ParkingLot(Place):
 
     def __unicode__(self):
         return u"%s the parking lot" % self.name
+
+class Timestamp(models.Model):
+    date = models.DateField()
+
+class Checkin(Place, Timestamp):
+    comment = models.CharField(max_length=140)
+
+    def __unicode__(self):
+        return u"%s at %s: %s" % (self.name, self.date, self.comment)
 
 #
 # Abstract base classes with related models where the sub-class has the

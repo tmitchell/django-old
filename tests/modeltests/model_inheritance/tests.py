@@ -3,8 +3,8 @@ from operator import attrgetter
 from django.core.exceptions import FieldError
 from django.test import TestCase
 
-from models import (Chef, CommonInfo, ItalianRestaurant, ParkingLot, Place,
-    Post, Restaurant, Student, StudentWorker, Supplier, Worker, MixinModel)
+from models import (Checkin, Chef, CommonInfo, ItalianRestaurant, ParkingLot, Place,
+    Post, Restaurant, Student, StudentWorker, Supplier, Timestamp, Worker, MixinModel)
 
 
 class ModelInheritanceTests(TestCase):
@@ -273,3 +273,32 @@ class ModelInheritanceTests(TestCase):
     def test_mixin_init(self):
         m = MixinModel()
         self.assertEqual(m.other_attr, 1)
+
+    def test_create_prepare_child(self):
+        r1 = Restaurant.objects.create(
+            name="Tony's Place",
+            address="123 Canterbury Way",
+            serves_hot_dogs=False,
+            serves_pizza=False,
+            rating=3,
+        )
+        ir1 = ItalianRestaurant.objects.create_child(r1, serves_gnocchi=True)
+
+        # did it work?
+        self.assertEqual(ir1.restaurant_ptr.pk, r1.pk)
+        self.assertEqual(ir1.name, "Tony's Place")
+        self.assertTrue(ir1.serves_gnocchi)
+        # make sure the one-to-one is in-place
+        ir1.rating = 4
+        ir1.save()
+        self.assertEqual(Restaurant.objects.get(pk=r1.pk).rating, 4)
+        ir1.delete()
+        self.assertRaises(Restaurant.DoesNotExist, lambda: Restaurant.objects.get(name="Tony's Place"))
+
+        # try with multiple parents
+        p1 = Place.objects.create(name='Costco', address='14501 Hindry Ave, Hawthorne, CA')
+        t1 = Timestamp.objects.create(date='2011-07-17')
+        c1 = Checkin.objects.prepare_child(p1, t1)
+        c1.comment = "Hello World"
+        c1.save()
+        self.assertQuerysetEqual(Checkin.objects.all(), ['<Checkin: Costco at 2011-07-17: Hello World>'])
