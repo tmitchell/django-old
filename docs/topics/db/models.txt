@@ -1025,6 +1025,15 @@ own :class:`~django.db.models.OneToOneField` and set
 :attr:`parent_link=True <django.db.models.OneToOneField.parent_link>`
 to indicate that your field is the link back to the parent class.
 
+
+Specifying parent model instances
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 1.4
+
+When using multi-table inheritance, you can use :meth:`~django.db.models.query.QuerySet.prepare_child` to
+create a derived model object from one or more existing parent objects.
+
 .. _proxy-models:
 
 Proxy models

@@ -1379,6 +1379,45 @@ methods on your models. It does, however, emit the
 :data:`~django.db.models.signals.post_delete` signals for all deleted objects
 (including cascaded deletions).
 
+prepare_child
+~~~~~~~~~~~~~
+
+.. method:: prepare_child(*parents)
+
+.. versionadded:: 1.4
+
+Creates a child object for a model using :ref:`multi-table inheritance <multi-table-inheritance>`,
+allowing you to specify already-existing parent objects to reuse.
+
+Example::
+
+    p = Place.objects.create(name="Bob's Cafe", address="123 Main St.")
+    r = Restaurant.objects.prepare_child(p)
+    r.serves_hot_dogs = True
+    r.save()
+
+create_child
+~~~~~~~~~~~~
+
+.. method:: create_child(*parents, **kwargs)
+
+.. versionadded:: 1.4
+
+A convenience method for creating an object using multi-table inheritance and saving it all in one step.
+Each non-abstract parent object should be passed in, followed by any creation arguments for the derived model.
+
+Thus::
+
+    r = Restaurant.objects.create_child(p, serves_hot_dogs=True)
+
+and::
+
+    r = Restaurant.objects.prepare_child(p)
+    r.serves_hot_dogs = True
+    r.save()
+
+are equivalent.
+
 .. _field-lookups:
 
 Field lookups
