@@ -1495,7 +1495,7 @@ class FormsTestCase(TestCase):
                 form = UserRegistration(auto_id=False)
 
             if form.is_valid():
-                return 'VALID: %r' % form.cleaned_data
+                return 'VALID: %r' % sorted(form.cleaned_data.iteritems())
 
             t = Template('<form action="" method="post">\n<table>\n{{ form }}\n</table>\n<input type="submit" />\n</form>')
             return t.render(Context({'form': form}))
@@ -1520,7 +1520,8 @@ class FormsTestCase(TestCase):
 <input type="submit" />
 </form>""")
         # Case 3: POST with valid data (the success message).)
-        self.assertHTMLEqual(my_function('POST', {'username': 'adrian', 'password1': 'secret', 'password2': 'secret'}), "VALID: {'username': u'adrian', 'password1': u'secret', 'password2': u'secret'}")
+        self.assertEqual(my_function('POST', {'username': 'adrian', 'password1': 'secret', 'password2': 'secret'}), 
+                    "VALID: [('password1', u'secret'), ('password2', u'secret'), ('username', u'adrian')]")
 
     def test_templates_with_forms(self):
         class UserRegistration(Form):
