@@ -1438,10 +1438,8 @@ class Queries6Tests(TestCase):
 
         # This example is tricky because the parent could be NULL, so only checking
         # parents with annotations omits some results (tag t1, in this case).
-        self.assertQuerysetEqual(
-            Tag.objects.exclude(parent__annotation__name="a1"),
-            ['<Tag: t1>', '<Tag: t4>', '<Tag: t5>']
-        )
+        qs = Tag.objects.exclude(parent__annotation__name="a1")
+        self.assertQuerysetEqual(qs, ['<Tag: t1>', '<Tag: t4>', '<Tag: t5>'])
 
         # The annotation->tag link is single values and tag->children links is
         # multi-valued. So we have to split the exclude filter in the middle
