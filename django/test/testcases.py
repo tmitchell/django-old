@@ -441,6 +441,19 @@ class SimpleTestCase(ut2.TestCase):
                 safe_repr(dom1, True), safe_repr(dom2, True))
             self.fail(self._formatMessage(msg, standardMsg))
 
+    def assertInHTML(self, needle, haystack, count = None, msg_prefix=''):
+        needle = assert_and_parse_html(self, needle, None,
+            u"First argument is not valid HTML:")
+        haystack = assert_and_parse_html(self, haystack, None,
+            u"Second argument is not valid HTML:")
+        real_count = haystack.count(needle)
+        if count is not None:
+            self.assertEqual(real_count, count,
+                msg_prefix + "Found %d instances of '%s' in response"
+                " (expected %d)" % (real_count, needle, count))
+        else:
+            self.assertTrue(real_count != 0,
+                msg_prefix + "Couldn't find '%s' in response" % needle)
 
 class TransactionTestCase(SimpleTestCase):
     # The class we'll use for the test client self.client.

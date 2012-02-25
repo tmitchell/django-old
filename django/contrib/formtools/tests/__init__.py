@@ -12,6 +12,7 @@ from django.utils import unittest
 
 from django.contrib.formtools.tests.wizard import *
 from django.contrib.formtools.tests.forms import *
+from django.test.html import parse_html
 
 warnings.filterwarnings('ignore', category=PendingDeprecationWarning,
                         module='django.contrib.formtools.wizard')
@@ -259,7 +260,7 @@ class DummyRequest(http.HttpRequest):
 
 class WizardTests(FormToolsTestCase):
     urls = 'django.contrib.formtools.tests.urls'
-    input_re = re.compile('name="([^"]+)" value="([^"]+)"')
+
     wizard_step_data = (
         {
             '0-name': 'Pony',
@@ -429,14 +430,12 @@ class WizardTests(FormToolsTestCase):
         """
         Pull the appropriate field data from the context to pass to the next wizard step
         """
-        previous_fields = response.context['previous_fields']
+        previous_fields = parse_html(response.context['previous_fields'])
         fields = {'wizard_step': response.context['step0']}
 
-        def grab(m):
-            fields[m.group(1)] = m.group(2)
-            return ''
+        for input_field in previous_fields:
+            fields[input_field.attr("name")] = input_field.attr("value")
 
-        self.input_re.sub(grab, previous_fields)
         return fields
 
     def check_wizard_step(self, response, step_no):
