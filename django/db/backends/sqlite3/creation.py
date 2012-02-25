@@ -45,6 +45,16 @@ class DatabaseCreation(BaseDatabaseCreation):
             return test_database_name
         return ':memory:'
 
+    def test_db_signature(self):
+        settings_dict = self.connection.settings_dict
+        db_name = self._get_test_db_name()
+        return (
+            settings_dict['HOST'],
+            settings_dict['PORT'],
+            settings_dict['ENGINE'],
+            db_name if db_name != ":memory:" else float("NaN"),  # We use NaN as it never hashes equal
+        )
+
     def _create_test_db(self, verbosity, autoclobber):
         test_database_name = self._get_test_db_name()
         if test_database_name != ':memory:':
