@@ -2,6 +2,7 @@ from __future__ import absolute_import
 
 from django.core import serializers
 from django.test import TestCase
+from django.utils import simplejson as json
 
 from .fields import Small
 from .models import DataModel, MyModel, OtherModel
@@ -57,7 +58,11 @@ class CustomField(TestCase):
 
         # Serialization works, too.
         stream = serializers.serialize("json", MyModel.objects.all())
-        self.assertEqual(stream, '[{"pk": %d, "model": "field_subclassing.mymodel", "fields": {"data": "12", "name": "m"}}]' % m1.pk)
+        self.assertJSONEqual(stream, [{
+            "pk": m1.pk,
+            "model": "field_subclassing.mymodel",
+            "fields": {"data": "12", "name": "m"}
+        }])
 
         obj = list(serializers.deserialize("json", stream))[0]
         self.assertEqual(obj.object, m)

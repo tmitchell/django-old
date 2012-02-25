@@ -455,6 +455,18 @@ class SimpleTestCase(ut2.TestCase):
             self.assertTrue(real_count != 0,
                 msg_prefix + "Couldn't find '%s' in response" % needle)
 
+    def assertJSONEqual(self, raw, expected_data, msg=None):
+        try:
+            data = simplejson.loads(raw)
+        except ValueError:
+            self.fail("First argument is not valid JSON: %r" % raw)
+        if isinstance(expected_data, basestring):
+            try:
+                expected_data = simplejson.loads(expected_data)
+            except ValueError:
+                self.fail("Second argument is not valid JSON: %r" % expected_data)
+        self.assertEqual(data, expected_data, msg=msg)
+
 class TransactionTestCase(SimpleTestCase):
     # The class we'll use for the test client self.client.
     # Can be overridden in derived classes.
