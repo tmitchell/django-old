@@ -22,13 +22,16 @@ from django.utils.safestring import SafeString
 from django.utils import timezone
 
 try:
+    from pyspatialite import dbapi2 as Database
+except ImportError, exc:
     try:
         from pysqlite2 import dbapi2 as Database
-    except ImportError, e1:
-        from sqlite3 import dbapi2 as Database
-except ImportError, exc:
-    from django.core.exceptions import ImproperlyConfigured
-    raise ImproperlyConfigured("Error loading either pysqlite2 or sqlite3 modules (tried in that order): %s" % exc)
+    except ImportError, exc:
+        try:
+            from sqlite3 import dbapi2 as Database
+        except ImportError, exc:
+            from django.core.exceptions import ImproperlyConfigured
+            raise ImproperlyConfigured("Error loading either pyspatialite, pysqlite2 or sqlite3 modules (tried in that order): %s" % exc)
 
 
 DatabaseError = Database.DatabaseError
@@ -350,7 +353,7 @@ class SQLiteCursorWrapper(Database.Cursor):
             raise utils.DatabaseError, utils.DatabaseError(*tuple(e)), sys.exc_info()[2]
 
     def convert_query(self, query):
-        return FORMAT_QMARK_REGEX.sub('?', query).replace('%%','%')
+        return FORMAT_QMARK_REGEX.sub('?', query).replace('%%', '%')
 
 def _sqlite_extract(lookup_type, dt):
     if dt is None:
