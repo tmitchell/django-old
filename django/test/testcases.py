@@ -467,6 +467,25 @@ class SimpleTestCase(ut2.TestCase):
                 self.fail("Second argument is not valid JSON: %r" % expected_data)
         self.assertEqual(data, expected_data, msg=msg)
 
+    def assertXMLEqual(self, xml1, xml2, msg=None):
+        """
+        Asserts that two XML snippets are semantically the same.
+        Whitespace in most cases is ignored, and attribute ordering is not
+        significant. The passed-in arguments must be valid XML.
+        """
+        checker = OutputChecker()
+        if not checker.check_output_xml(xml1, xml2, None):
+            standardMsg = '%s != %s' % (safe_repr(xml1, True), safe_repr(xml2, True))
+            self.fail(self._formatMessage(msg, standardMsg))
+
+    def assertXMLNotEqual(self, xml1, xml2, msg=None):
+        """Asserts that two XML snippets are not semantically equivalent."""
+        checker = OutputChecker()
+        if checker.check_output_xml(xml1, xml2, None):
+            standardMsg = '%s == %s' % (safe_repr(xml1, True), safe_repr(xml2, True))
+            self.fail(self._formatMessage(msg, standardMsg))
+
+
 class TransactionTestCase(SimpleTestCase):
     # The class we'll use for the test client self.client.
     # Can be overridden in derived classes.
