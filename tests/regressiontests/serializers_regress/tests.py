@@ -40,9 +40,10 @@ from .models import (BooleanData, CharData, DateData, DateTimeData, EmailData,
     DecimalPKData, FloatPKData, IntegerPKData, IPAddressPKData,
     GenericIPAddressPKData, PhonePKData, PositiveIntegerPKData,
     PositiveSmallIntegerPKData, SlugPKData, SmallPKData, USStatePKData,
-    AutoNowDateTimeData, ModifyingSaveData, InheritAbstractModel,
-    ExplicitInheritBaseModel, InheritBaseModel, BigIntegerData, LengthModel,
-    Tag, ComplexModel)
+    AutoNowDateTimeData, ModifyingSaveData, InheritAbstractModel, BaseModel,
+    ExplicitInheritBaseModel, InheritBaseModel, ProxyBaseModel,
+    ProxyProxyBaseModel, BigIntegerData, LengthModel, Tag, ComplexModel,
+    NaturalKeyAnchor, FKDataNaturalKey)
 
 # A set of functions that can be used to recreate
 # test data objects of various kinds.
@@ -353,6 +354,12 @@ The end."""),
     (data_obj, 1005, LengthModel, 1),
 ]
 
+natural_key_test_data = [
+    (data_obj, 1100, NaturalKeyAnchor, "Natural Key Anghor"),
+    (fk_obj, 1101, FKDataNaturalKey, 1100),
+    (fk_obj, 1102, FKDataNaturalKey, None),
+]
+
 # Because Oracle treats the empty string as NULL, Oracle is expected to fail
 # when field.empty_strings_allowed is True and the value is None; skip these
 # tests.
@@ -408,6 +415,17 @@ class SerializerTests(TestCase):
             for obj in serializers.deserialize("yaml", "{"):
                 pass
 
+    def test_serialize_proxy_model(self):
+        BaseModel.objects.create(parent_data=1)
+        base_objects = BaseModel.objects.all()
+        proxy_objects = ProxyBaseModel.objects.all()
+        proxy_proxy_objects = ProxyProxyBaseModel.objects.all()
+        base_data = serializers.serialize("json", base_objects)
+        proxy_data = serializers.serialize("json", proxy_objects)
+        proxy_proxy_data = serializers.serialize("json", proxy_proxy_objects)
+        self.assertEqual(base_data, proxy_data.replace('proxy', ''))
+        self.assertEqual(base_data, proxy_proxy_data.replace('proxy', ''))
+
 
 def serializerTest(format, self):
 
@@ -434,6 +452,35 @@ def serializerTest(format, self):
     # Assert that the deserialized data is the same
     # as the original source
     for (func, pk, klass, datum) in test_data:
+        func[1](self, pk, klass, datum)
+
+    # Assert that the number of objects deserialized is the
+    # same as the number that was serialized.
+    for klass, count in instance_count.items():
+        self.assertEqual(count, klass.objects.count())
+
+def naturalKeySerializerTest(format, self):
+    # Create all the objects defined in the test data
+    objects = []
+    instance_count = {}
+    for (func, pk, klass, datum) in natural_key_test_data:
+        with connection.constraint_checks_disabled():
+            objects.extend(func[0](pk, klass, datum))
+
+    # Get a count of the number of objects created for each class
+    for klass in instance_count:
+        instance_count[klass] = klass.objects.count()
+
+    # Serialize the test database
+    serialized_data = serializers.serialize(format, objects, indent=2,
+        use_natural_keys=True)
+
+    for obj in serializers.deserialize(format, serialized_data):
+        obj.save()
+
+    # Assert that the deserialized data is the same
+    # as the original source
+    for (func, pk, klass, datum) in natural_key_test_data:
         func[1](self, pk, klass, datum)
 
     # Assert that the number of objects deserialized is the
@@ -471,6 +518,8 @@ def streamTest(format, self):
 
 for format in serializers.get_serializer_formats():
     setattr(SerializerTests, 'test_' + format + '_serializer', curry(serializerTest, format))
+    setattr(SerializerTests, 'test_' + format + '_natural_key_serializer', curry(naturalKeySerializerTest, format))
     setattr(SerializerTests, 'test_' + format + '_serializer_fields', curry(fieldsTest, format))
     if format != 'python':
         setattr(SerializerTests, 'test_' + format + '_serializer_stream', curry(streamTest, format))
+

@@ -111,6 +111,18 @@ class Anchor(models.Model):
     class Meta:
         ordering = ('id',)
 
+class NaturalKeyAnchorManager(models.Manager):
+    def get_by_natural_key(self, data):
+        return self.get(data=data)
+
+class NaturalKeyAnchor(models.Model):
+    objects = NaturalKeyAnchorManager()
+
+    data = models.CharField(max_length=100, unique=True)
+
+    def natural_key(self):
+        return (self.data,)
+
 class UniqueAnchor(models.Model):
     """This is a model that can be used as
     something for other models to point at"""
@@ -119,6 +131,9 @@ class UniqueAnchor(models.Model):
 
 class FKData(models.Model):
     data = models.ForeignKey(Anchor, null=True)
+
+class FKDataNaturalKey(models.Model):
+    data = models.ForeignKey(NaturalKeyAnchor, null=True)
 
 class M2MData(models.Model):
     data = models.ManyToManyField(Anchor, null=True)
@@ -259,8 +274,17 @@ class ExplicitInheritBaseModel(BaseModel):
     parent = models.OneToOneField(BaseModel)
     child_data = models.IntegerField()
 
+class ProxyBaseModel(BaseModel):
+    class Meta:
+        proxy = True
+
+class ProxyProxyBaseModel(ProxyBaseModel):
+    class Meta:
+        proxy = True
+
 class LengthModel(models.Model):
     data = models.IntegerField()
 
     def __len__(self):
         return self.data
+

@@ -79,7 +79,7 @@ class AdminSeleniumWebDriverTestCase(LiveServerTestCase):
         identified by the CSS selector `selector`.
         """
         from selenium.common.exceptions import NoSuchElementException
-        options = self.selenium.find_elements_by_css_selector('%s option' % selector)
+        options = self.selenium.find_elements_by_css_selector('%s > option' % selector)
         for option in options:
             if option.get_attribute('value') == value:
                 return option
@@ -90,8 +90,16 @@ class AdminSeleniumWebDriverTestCase(LiveServerTestCase):
         Asserts that the <SELECT> widget identified by `selector` has the
         options with the given `values`.
         """
-        options = self.selenium.find_elements_by_css_selector('%s option' % selector)
+        options = self.selenium.find_elements_by_css_selector('%s > option' % selector)
         actual_values = []
         for option in options:
             actual_values.append(option.get_attribute('value'))
         self.assertEqual(values, actual_values)
+
+    def has_css_class(self, selector, klass):
+        """
+        Returns True if the element identified by `selector` has the CSS class
+        `klass`.
+        """
+        return (self.selenium.find_element_by_css_selector(selector)
+                .get_attribute('class').find(klass) != -1)

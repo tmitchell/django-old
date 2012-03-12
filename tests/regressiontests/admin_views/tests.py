@@ -12,6 +12,7 @@ from django.core.exceptions import SuspiciousOperation
 from django.core.files import temp as tempfile
 from django.core.urlresolvers import reverse
 # Register auth models with the admin.
+from django.contrib import admin
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
@@ -41,7 +42,7 @@ from .models import (Article, BarAccount, CustomArticle, EmptyModel, FooAccount,
     FoodDelivery, RowLevelChangePermissionModel, Paper, CoverLetter, Story,
     OtherStory, ComplexSortedPerson, Parent, Child, AdminOrderedField,
     AdminOrderedModelMethod, AdminOrderedAdminMethod, AdminOrderedCallable,
-    Report, MainPrepopulated, RelatedPrepopulated)
+    Report, MainPrepopulated, RelatedPrepopulated, UnorderedObject)
 
 
 ERROR_MESSAGE = "Please enter the correct username and password \
@@ -272,9 +273,12 @@ class AdminViewBasicTest(TestCase):
         )
 
     def testChangeListSortingPreserveQuerySetOrdering(self):
-        # If no ordering on ModelAdmin, or query string, the underlying order of
-        # the queryset should not be changed.
-
+        """
+        If no ordering is defined in `ModelAdmin.ordering` or in the query
+        string, then the underlying order of the queryset should not be
+        changed, even if it is defined in `Modeladmin.queryset()`.
+        Refs #11868, #7309.
+        """
         p1 = Person.objects.create(name="Amy", gender=1, alive=True, age=80)
         p2 = Person.objects.create(name="Bob", gender=1, alive=True, age=70)
         p3 = Person.objects.create(name="Chris", gender=2, alive=False, age=60)
@@ -508,7 +512,7 @@ class AdminViewBasicTest(TestCase):
 
     def testI18NLanguageNonEnglishDefault(self):
         """
-        Check if the Javascript i18n view returns an empty language catalog
+        Check if the JavaScript i18n view returns an empty language catalog
         if the default language is non-English but the selected language
         is English. See #13388 and #3594 for more details.
         """
@@ -529,7 +533,7 @@ class AdminViewBasicTest(TestCase):
 
     def testL10NDeactivated(self):
         """
-        Check if L10N is deactivated, the Javascript i18n view doesn't
+        Check if L10N is deactivated, the JavaScript i18n view doesn't
         return localized date/time formats. Refs #14824.
         """
         with self.settings(LANGUAGE_CODE='ru', USE_L10N=False):
@@ -607,14 +611,22 @@ class AdminViewFormUrlTest(TestCase):
             self.assertTrue('custom_filter_template.html' in [t.name for t in response.templates])
 
 
-class AdminJavaScriptTest(AdminViewBasicTest):
+class AdminJavaScriptTest(TestCase):
+    fixtures = ['admin-views-users.xml']
+
     urls = "regressiontests.admin_views.urls"
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
 
     def testSingleWidgetFirsFieldFocus(self):
         """
         JavaScript-assisted auto-focus on first field.
         """
-        response = self.client.get('/test_admin/%s/admin_views/picture/add/' % self.urlbit)
+        response = self.client.get('/test_admin/%s/admin_views/picture/add/' % 'admin')
         self.assertContains(
             response,
             '<script type="text/javascript">document.getElementById("id_name").focus();</script>'
@@ -625,7 +637,7 @@ class AdminJavaScriptTest(AdminViewBasicTest):
         JavaScript-assisted auto-focus should work if a model/ModelAdmin setup
         is such that the first form field has a MultiWidget.
         """
-        response = self.client.get('/test_admin/%s/admin_views/reservation/add/' % self.urlbit)
+        response = self.client.get('/test_admin/%s/admin_views/reservation/add/' % 'admin')
         self.assertContains(
             response,
             '<script type="text/javascript">document.getElementById("id_start_date_0").focus();</script>'
@@ -640,7 +652,7 @@ class AdminJavaScriptTest(AdminViewBasicTest):
         """
         with override_settings(DEBUG=False):
             response = self.client.get(
-                '/test_admin/%s/admin_views/section/add/' % self.urlbit)
+                '/test_admin/%s/admin_views/section/add/' % 'admin')
             self.assertNotContains(response, 'jquery.js')
             self.assertContains(response, 'jquery.min.js')
             self.assertNotContains(response, 'prepopulate.js')
@@ -653,7 +665,7 @@ class AdminJavaScriptTest(AdminViewBasicTest):
             self.assertContains(response, 'inlines.min.js')
         with override_settings(DEBUG=True):
             response = self.client.get(
-                '/test_admin/%s/admin_views/section/add/' % self.urlbit)
+                '/test_admin/%s/admin_views/section/add/' % 'admin')
             self.assertContains(response, 'jquery.js')
             self.assertNotContains(response, 'jquery.min.js')
             self.assertContains(response, 'prepopulate.js')
@@ -1873,6 +1885,23 @@ class AdminViewListEditable(TestCase):
         self.assertEqual(Category.objects.get(id=3).order, 1)
         self.assertEqual(Category.objects.get(id=4).order, 0)
 
+    def test_list_editable_pagination(self):
+        """
+        Ensure that pagination works for list_editable items.
+        Refs #16819.
+        """
+        UnorderedObject.objects.create(id=1, name='Unordered object #1')
+        UnorderedObject.objects.create(id=2, name='Unordered object #2')
+        UnorderedObject.objects.create(id=3, name='Unordered object #3')
+        response = self.client.get('/test_admin/admin/admin_views/unorderedobject/')
+        self.assertContains(response, 'Unordered object #1')
+        self.assertContains(response, 'Unordered object #2')
+        self.assertNotContains(response, 'Unordered object #3')
+        response = self.client.get('/test_admin/admin/admin_views/unorderedobject/?p=1')
+        self.assertNotContains(response, 'Unordered object #1')
+        self.assertNotContains(response, 'Unordered object #2')
+        self.assertContains(response, 'Unordered object #3')
+
     def test_list_editable_action_submit(self):
         # List editable changes should not be executed if the action "Go" button is
         # used to submit the form.
@@ -2854,7 +2883,7 @@ class NeverCacheTests(TestCase):
         self.assertEqual(get_max_age(response), None)
 
     def testJsi18n(self):
-        "Check the never-cache status of the Javascript i18n view"
+        "Check the never-cache status of the JavaScript i18n view"
         response = self.client.get('/test_admin/admin/jsi18n/')
         self.assertEqual(get_max_age(response), None)
 
@@ -2888,7 +2917,7 @@ class PrePopulatedTest(TestCase):
     def test_prepopulated_maxlength_localized(self):
         """
         Regression test for #15938: if USE_THOUSAND_SEPARATOR is set, make sure
-        that maxLength (in the javascript) is rendered without separators.
+        that maxLength (in the JavaScript) is rendered without separators.
         """
         response = self.client.get('/test_admin/admin/admin_views/prepopulatedpostlargeslug/add/')
         self.assertContains(response, "maxLength: 1000") # instead of 1,000
@@ -2901,10 +2930,11 @@ class SeleniumPrePopulatedFirefoxTests(AdminSeleniumWebDriverTestCase):
 
     def test_basic(self):
         """
-        Ensure that the Javascript-automated prepopulated fields work with the
+        Ensure that the JavaScript-automated prepopulated fields work with the
         main form and with stacked and tabular inlines.
         Refs #13068, #9264, #9983, #9784.
         """
+        from selenium.common.exceptions import TimeoutException
         self.admin_login(username='super', password='secret', login_url='/test_admin/admin/')
         self.selenium.get('%s%s' % (self.live_server_url,
             '/test_admin/admin/admin_views/mainprepopulated/add/'))
@@ -2929,7 +2959,7 @@ class SeleniumPrePopulatedFirefoxTests(AdminSeleniumWebDriverTestCase):
         self.assertEqual(slug2, 'option-one-here-stacked-inline')
 
         # Add an inline
-        self.selenium.find_element_by_css_selector('#relatedprepopulated_set-group .add-row a').click()
+        self.selenium.find_elements_by_link_text('Add another Related Prepopulated')[0].click()
         self.selenium.find_element_by_css_selector('#id_relatedprepopulated_set-1-pubdate').send_keys('1999-01-25')
         self.get_select_option('#id_relatedprepopulated_set-1-status', 'option two').click()
         self.selenium.find_element_by_css_selector('#id_relatedprepopulated_set-1-name').send_keys(u' now you haVe anöther   sŤāÇkeð  inline with a very ... loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog text... ')
@@ -2949,7 +2979,7 @@ class SeleniumPrePopulatedFirefoxTests(AdminSeleniumWebDriverTestCase):
         self.assertEqual(slug2, 'option-two-and-now-tabular-inline')
 
         # Add an inline
-        self.selenium.find_element_by_css_selector('#relatedprepopulated_set-2-group .add-row a').click()
+        self.selenium.find_elements_by_link_text('Add another Related Prepopulated')[1].click()
         self.selenium.find_element_by_css_selector('#id_relatedprepopulated_set-2-1-pubdate').send_keys('1981-08-22')
         self.get_select_option('#id_relatedprepopulated_set-2-1-status', 'option one').click()
         self.selenium.find_element_by_css_selector('#id_relatedprepopulated_set-2-1-name').send_keys(u'a tÃbűlaŘ inline with ignored ;"&*^\%$#@-/`~ characters')
@@ -2960,6 +2990,16 @@ class SeleniumPrePopulatedFirefoxTests(AdminSeleniumWebDriverTestCase):
 
         # Save and check that everything is properly stored in the database
         self.selenium.find_element_by_xpath('//input[@value="Save"]').click()
+
+        try:
+            # Wait for the next page to be loaded.
+            self.wait_loaded_tag('body')
+        except TimeoutException:
+            # IE7 occasionnally returns an error "Internet Explorer cannot
+            # display the webpage" and doesn't load the next page. We just
+            # ignore it.
+            pass
+
         self.assertEqual(MainPrepopulated.objects.all().count(), 1)
         MainPrepopulated.objects.get(
             name=u' this is the mAin nÀMë and it\'s awεšome',
@@ -3001,6 +3041,9 @@ class SeleniumPrePopulatedFirefoxTests(AdminSeleniumWebDriverTestCase):
 
 class SeleniumPrePopulatedChromeTests(SeleniumPrePopulatedFirefoxTests):
     webdriver_class = 'selenium.webdriver.chrome.webdriver.WebDriver'
+
+class SeleniumPrePopulatedIETests(SeleniumPrePopulatedFirefoxTests):
+    webdriver_class = 'selenium.webdriver.ie.webdriver.WebDriver'
 
 
 class ReadonlyTest(TestCase):
