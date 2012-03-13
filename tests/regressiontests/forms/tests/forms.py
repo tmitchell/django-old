@@ -137,11 +137,7 @@ class FormsTestCase(TestCase):
         self.assertEqual(p.errors['first_name'], [u'This field is required.'])
         self.assertEqual(p.errors['birthday'], [u'This field is required.'])
         self.assertFalse(p.is_valid())
-        self.assertHTMLEqual(p.errors.as_ul(), u'<ul class="errorlist"><li>first_name<ul class="errorlist"><li>This field is required.</li></ul></li><li>birthday<ul class="errorlist"><li>This field is required.</li></ul></li></ul>')
-        self.assertEqual(p.errors.as_text(), """* first_name
-  * This field is required.
-* birthday
-  * This field is required.""")
+        self.assertDictEqual(p.errors, {'birthday': [u'This field is required.'], 'first_name': [u'This field is required.']})
         try:
             p.cleaned_data
             self.fail('Attempts to access cleaned_data when validation fails should fail.')
