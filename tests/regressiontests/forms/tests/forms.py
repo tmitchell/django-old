@@ -137,11 +137,7 @@ class FormsTestCase(TestCase):
         self.assertEqual(p.errors['first_name'], [u'This field is required.'])
         self.assertEqual(p.errors['birthday'], [u'This field is required.'])
         self.assertFalse(p.is_valid())
-        self.assertHTMLEqual(p.errors.as_ul(), u'<ul class="errorlist"><li>first_name<ul class="errorlist"><li>This field is required.</li></ul></li><li>birthday<ul class="errorlist"><li>This field is required.</li></ul></li></ul>')
-        self.assertEqual(p.errors.as_text(), """* first_name
-  * This field is required.
-* birthday
-  * This field is required.""")
+        self.assertDictEqual(p.errors, {'birthday': [u'This field is required.'], 'first_name': [u'This field is required.']})
         try:
             p.cleaned_data
             self.fail('Attempts to access cleaned_data when validation fails should fail.')
@@ -1495,7 +1491,7 @@ class FormsTestCase(TestCase):
                 form = UserRegistration(auto_id=False)
 
             if form.is_valid():
-                return 'VALID: %r' % form.cleaned_data
+                return 'VALID: %r' % sorted(form.cleaned_data.iteritems())
 
             t = Template('<form action="" method="post">\n<table>\n{{ form }}\n</table>\n<input type="submit" />\n</form>')
             return t.render(Context({'form': form}))
@@ -1520,7 +1516,8 @@ class FormsTestCase(TestCase):
 <input type="submit" />
 </form>""")
         # Case 3: POST with valid data (the success message).)
-        self.assertHTMLEqual(my_function('POST', {'username': 'adrian', 'password1': 'secret', 'password2': 'secret'}), "VALID: {'username': u'adrian', 'password1': u'secret', 'password2': u'secret'}")
+        self.assertEqual(my_function('POST', {'username': 'adrian', 'password1': 'secret', 'password2': 'secret'}), 
+                    "VALID: [('password1', u'secret'), ('password2', u'secret'), ('username', u'adrian')]")
 
     def test_templates_with_forms(self):
         class UserRegistration(Form):

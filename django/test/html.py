@@ -20,6 +20,16 @@ class Element(object):
         self.attributes = sorted(attributes)
         self.children = []
 
+    def attr(self, key):
+        """
+        Helper for fetching attributes by name.
+        """
+        for k, v in self.attributes:
+            if key == k:
+                return v
+        else:
+            raise KeyError(key)
+
     def append(self, element):
         if isinstance(element, basestring):
             element = force_unicode(element)

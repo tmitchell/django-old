@@ -1,7 +1,7 @@
 """
 Tests for django test runner
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, with_statement
 
 import StringIO
 from optparse import make_option
@@ -139,6 +139,25 @@ class DependencyOrderingTests(unittest.TestCase):
         }
 
         self.assertRaises(ImproperlyConfigured, simple.dependency_ordered, raw, dependencies=dependencies)
+
+    def test_own_alias_dependency(self):
+        raw = [
+            ('s1', ('s1_db', ['alpha', 'bravo']))
+        ]
+        dependencies = {
+            'alpha': ['bravo']
+        }
+
+        with self.assertRaises(ImproperlyConfigured):
+            simple.dependency_ordered(raw, dependencies=dependencies)
+
+        # reordering aliases shouldn't matter
+        raw = [
+            ('s1', ('s1_db', ['bravo', 'alpha']))
+        ]
+
+        with self.assertRaises(ImproperlyConfigured):
+            simple.dependency_ordered(raw, dependencies=dependencies)
 
 
 class MockTestRunner(object):

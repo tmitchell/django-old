@@ -49,7 +49,11 @@ class HTMLParser(_HTMLParser.HTMLParser):
                  attrvalue[:1] == '"' == attrvalue[-1:]:
                 attrvalue = attrvalue[1:-1]
                 attrvalue = self.unescape(attrvalue)
-            attrs.append((attrname.lower(), attrvalue))
+            # we don't care about the order of CSS classes
+            attr_lower = attrname.lower()
+            if attr_lower == "class":
+                attrvalue = ' '.join(sorted(attrvalue.split(' ')))
+            attrs.append((attr_lower, attrvalue))
             k = m.end()
 
         end = rawdata[k:endpos].strip()

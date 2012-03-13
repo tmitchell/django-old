@@ -5,6 +5,7 @@ import sys
 import urllib
 import urlparse
 from email.utils import formatdate
+from operator import itemgetter
 
 from django.utils.datastructures import MultiValueDict
 from django.utils.encoding import smart_str, force_unicode
@@ -59,6 +60,8 @@ def urlunquote_plus(quoted_url):
     return force_unicode(urllib.unquote_plus(smart_str(quoted_url)))
 urlunquote_plus = allow_lazy(urlunquote_plus, unicode)
 
+_getfirst = itemgetter(0)
+
 def urlencode(query, doseq=0):
     """
     A version of Python's urllib.urlencode() function that can operate on
@@ -72,7 +75,7 @@ def urlencode(query, doseq=0):
     return urllib.urlencode(
         [(smart_str(k),
          isinstance(v, (list,tuple)) and [smart_str(i) for i in v] or smart_str(v))
-            for k, v in query],
+            for k, v in sorted(query, key=_getfirst)],
         doseq)
 
 def cookie_date(epoch_seconds=None):

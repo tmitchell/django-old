@@ -1,7 +1,7 @@
 """
 Tests for stuff in django.utils.datastructures.
 """
-
+from __future__ import with_statement
 import copy
 import pickle
 
@@ -179,20 +179,19 @@ class MultiValueDictTests(SimpleTestCase):
         self.assertEqual(d['name'], 'Simon')
         self.assertEqual(d.get('name'), 'Simon')
         self.assertEqual(d.getlist('name'), ['Adrian', 'Simon'])
-        self.assertEqual(list(d.iteritems()),
-                          [('position', 'Developer'), ('name', 'Simon')])
+        self.assertEqual(sorted(d.iteritems()),
+                          [('name', 'Simon'), ('position', 'Developer')])
 
-        self.assertEqual(list(d.iterlists()),
-                          [('position', ['Developer']),
-                           ('name', ['Adrian', 'Simon'])])
+        self.assertEqual(sorted(d.iterlists()),
+                          [('name', ['Adrian', 'Simon']),
+                           ('position', ['Developer'])])
 
         # MultiValueDictKeyError: "Key 'lastname' not found in
         # <MultiValueDict: {'position': ['Developer'],
         #                   'name': ['Adrian', 'Simon']}>"
-        self.assertRaisesMessage(MultiValueDictKeyError,
-            '"Key \'lastname\' not found in <MultiValueDict: {\'position\':'\
-            ' [\'Developer\'], \'name\': [\'Adrian\', \'Simon\']}>"',
-            d.__getitem__, 'lastname')
+        with self.assertRaisesRegexp(MultiValueDictKeyError,
+                '''^"Key 'lastname' not found in <MultiValueDict: .+>"$'''):
+            d['lastname']
 
         self.assertEqual(d.get('lastname'), None)
         self.assertEqual(d.get('lastname', 'nonexistent'), 'nonexistent')
@@ -202,8 +201,8 @@ class MultiValueDictTests(SimpleTestCase):
 
         d.setlist('lastname', ['Holovaty', 'Willison'])
         self.assertEqual(d.getlist('lastname'), ['Holovaty', 'Willison'])
-        self.assertEqual(d.values(), ['Developer', 'Simon', 'Willison'])
-        self.assertEqual(list(d.itervalues()),
+        self.assertEqual(sorted(d.values()), ['Developer', 'Simon', 'Willison'])
+        self.assertEqual(sorted(d.itervalues()),
                           ['Developer', 'Simon', 'Willison'])
 
     def test_appendlist(self):

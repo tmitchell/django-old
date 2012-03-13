@@ -17,6 +17,7 @@ from django.db.models import signals
 from django.test import (TestCase, TransactionTestCase, skipIfDBFeature,
     skipUnlessDBFeature)
 from django.test.utils import override_settings
+from django.utils import simplejson
 
 from .models import (Animal, Stuff, Absolute, Parent, Child, Article, Widget,
     Store, Person, Book, NKChild, RefToNKChild, Circle1, Circle2, Circle3,
@@ -332,15 +333,17 @@ class TestFixtures(TestCase):
         # between different Python versions.
         data = re.sub('0{6,}\d', '', data)
 
-        lion_json = '{"pk": 1, "model": "fixtures_regress.animal", "fields": {"count": 3, "weight": 1.2, "name": "Lion", "latin_name": "Panthera leo"}}'
-        emu_json = '{"pk": 10, "model": "fixtures_regress.animal", "fields": {"count": 42, "weight": 1.2, "name": "Emu", "latin_name": "Dromaius novaehollandiae"}}'
-        platypus_json = '{"pk": %d, "model": "fixtures_regress.animal", "fields": {"count": 2, "weight": 2.2, "name": "Platypus", "latin_name": "Ornithorhynchus anatinus"}}'
-        platypus_json = platypus_json % animal.pk
+        animals_data = sorted([
+            {u"pk": 1, u"model": u"fixtures_regress.animal", u"fields": {u"count": 3, u"weight": 1.2, u"name": u"Lion", u"latin_name": u"Panthera leo"}},
+            {u"pk": 10, u"model": u"fixtures_regress.animal", u"fields": {u"count": 42, u"weight": 1.2, u"name": u"Emu", u"latin_name": u"Dromaius novaehollandiae"}},
+            {u"pk": animal.pk, u"model": u"fixtures_regress.animal", u"fields": {u"count": 2, u"weight": 2.2, u"name": u"Platypus", u"latin_name": u"Ornithorhynchus anatinus"}},
+        ], key=lambda x: x["pk"])
+        
+        data = sorted(simplejson.loads(data), key=lambda x: x["pk"])
+        
+        self.maxDiff = 1024
+        self.assertEqual(data, animals_data)
 
-        self.assertEqual(len(data), len('[%s]' % ', '.join([lion_json, emu_json, platypus_json])))
-        self.assertTrue(lion_json in data)
-        self.assertTrue(emu_json in data)
-        self.assertTrue(platypus_json in data)
 
     def test_proxy_model_included(self):
         """
@@ -356,7 +359,7 @@ class TestFixtures(TestCase):
             format='json',
             stdout=stdout
         )
-        self.assertEqual(
+        self.assertJSONEqual(
             stdout.getvalue(),
             """[{"pk": %d, "model": "fixtures_regress.widget", "fields": {"name": "grommet"}}]"""
             % widget.pk
@@ -522,7 +525,7 @@ class NaturalKeyFixtureTests(TestCase):
             use_natural_keys=True,
             stdout=stdout,
         )
-        self.assertEqual(
+        self.assertJSONEqual(
             stdout.getvalue(),
             """[{"pk": 2, "model": "fixtures_regress.store", "fields": {"name": "Amazon"}}, {"pk": 3, "model": "fixtures_regress.store", "fields": {"name": "Borders"}}, {"pk": 4, "model": "fixtures_regress.person", "fields": {"name": "Neal Stephenson"}}, {"pk": 1, "model": "fixtures_regress.book", "fields": {"stores": [["Amazon"], ["Borders"]], "name": "Cryptonomicon", "author": ["Neal Stephenson"]}}]"""
         )

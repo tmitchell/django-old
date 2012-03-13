@@ -114,10 +114,10 @@ class QueryDictTests(unittest.TestCase):
         self.assertTrue(q.has_key('foo'))
         self.assertTrue('foo' in q)
 
-        self.assertEqual(q.items(),  [(u'foo', u'another'), (u'name', u'john')])
-        self.assertEqual(q.lists(), [(u'foo', [u'bar', u'baz', u'another']), (u'name', [u'john'])])
-        self.assertEqual(q.keys(), [u'foo', u'name'])
-        self.assertEqual(q.values(), [u'another', u'john'])
+        self.assertListEqual(sorted(q.items()),  [(u'foo', u'another'), (u'name', u'john')])
+        self.assertListEqual(sorted(q.lists()), [(u'foo', [u'bar', u'baz', u'another']), (u'name', [u'john'])])
+        self.assertListEqual(sorted(q.keys()), [u'foo', u'name'])
+        self.assertListEqual(sorted(q.values()), [u'another', u'john'])
         self.assertEqual(len(q), 2)
 
         q.update({'foo': 'hello'})
@@ -130,7 +130,7 @@ class QueryDictTests(unittest.TestCase):
         self.assertEqual(q.setdefault('foo', 'bar'), 'bar')
         self.assertEqual(q['foo'], 'bar')
         self.assertEqual(q.getlist('foo'), ['bar'])
-        self.assertEqual(q.urlencode(), 'foo=bar&name=john')
+        self.assertListEqual(sorted(q.urlencode().split('&')), ['foo=bar','name=john'])
 
         q.clear()
         self.assertEqual(len(q), 0)
