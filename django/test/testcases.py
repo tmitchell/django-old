@@ -125,7 +125,10 @@ class OutputChecker(doctest.OutputChecker):
             optionflags)
 
     def check_output_xml(self, want, got, optionsflags):
-        return compare_xml(want, got)
+        try:
+            return compare_xml(want, got)
+        except Exception:
+            return False
 
     def check_output_json(self, want, got, optionsflags):
         """

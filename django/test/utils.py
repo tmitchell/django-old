@@ -280,11 +280,8 @@ def compare_xml(want, got):
         got = wrapper % got
 
     # Parse the want and got strings, and compare the parsings.
-    try:
-        want_root = parseString(want).firstChild
-        got_root = parseString(got).firstChild
-    except Exception:
-        return False
+    want_root = parseString(want).firstChild
+    got_root = parseString(got).firstChild
 
     return check_element(want_root, got_root)
 
