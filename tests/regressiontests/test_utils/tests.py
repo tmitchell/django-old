@@ -463,9 +463,10 @@ class XMLEqualTests(TestCase):
         self.assertXMLEqual(xml1, xml2)
 
     def test_simple_equal_raise(self):
-        xml1 = "<elem attr1='a' />"
-        xml2 = "<elem attr2='b' attr1='a' />"
-        self.assertRaises(AssertionError, lambda: self.assertXMLEqual(xml1, xml2))
+        with self.assertRaises(AssertionError):
+            xml1 = "<elem attr1='a' />"
+            xml2 = "<elem attr2='b' attr1='a' />"
+            self.assertXMLEqual(xml1, xml2)
 
     def test_simple_not_equal(self):
         xml1 = "<elem attr1='a' attr2='c' />"
@@ -473,9 +474,10 @@ class XMLEqualTests(TestCase):
         self.assertXMLNotEqual(xml1, xml2)
 
     def test_simple_not_equal_raise(self):
-        xml1 = "<elem attr1='a' attr2='b' />"
-        xml2 = "<elem attr2='b' attr1='a' />"
-        self.assertRaises(AssertionError, lambda: self.assertXMLNotEqual(xml1, xml2))
+        with self.assertRaises(AssertionError):
+            xml1 = "<elem attr1='a' attr2='b' />"
+            xml2 = "<elem attr2='b' attr1='a' />"
+            self.assertXMLNotEqual(xml1, xml2)
 
 
 class SkippingExtraTests(TestCase):
