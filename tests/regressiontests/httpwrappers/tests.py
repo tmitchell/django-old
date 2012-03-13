@@ -130,7 +130,7 @@ class QueryDictTests(unittest.TestCase):
         self.assertEqual(q.setdefault('foo', 'bar'), 'bar')
         self.assertEqual(q['foo'], 'bar')
         self.assertEqual(q.getlist('foo'), ['bar'])
-        self.assertEqual(q.urlencode(), 'foo=bar&name=john')
+        self.assertListEqual(sorted(q.urlencode().split('&')), ['foo=bar','name=john'])
 
         q.clear()
         self.assertEqual(len(q), 0)
